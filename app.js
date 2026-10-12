@@ -1,14 +1,19 @@
 // ---------- Daten ----------
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {} });
 let db = laden();
 function laden() { try { return Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return leer(); } }
-function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); }
+function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpiegeln(); }
+// Auszug für den Service Worker, damit er im Hintergrund fällige Arbeiten melden kann
+function statusSpiegeln() {
+  if (!window.caches) return Promise.resolve();
+  return statusSchreiben('daten', { push: !!db.einstellungen.push,
+    standorte: db.standorte.filter(hatKoord).map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, beuten: beutenAm(s) })),
+    aufgaben: db.aufgaben.filter(a => !a.erledigt && a.faellig).map(a => ({ id: a.id, titel: a.titel, faellig: a.faellig })) }).catch(() => {});
+}
 
 const $ = s => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const iso = d => d.toLocaleDateString('sv');
-const heute = () => iso(new Date());
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtD = d => d ? d.split('-').reverse().join('.') : '–';
 const zahl = (n, st = 1) => n == null ? '–' : Number(n).toLocaleString('de-AT', { maximumFractionDigits: st });
@@ -50,7 +55,7 @@ const DEF = {
     { k: 'name', label: 'Name / Nummer', req: 1 },
     { k: 'standortId', label: 'Standplatz', typ: 'select', opts: [['', '–'], ...optS()] },
     { k: 'status', label: 'Status', typ: 'select', opts: ['aktiv', 'Ableger', 'Schwarm', 'aufgelöst'] },
-    { k: 'beute', label: 'Beutensystem', typ: 'select', opts: ['Zander', 'Einheitsmaß', 'Dadant', 'Langstroth', 'Deutsch Normal', 'Kuntzsch', 'Sonstige'] },
+    { k: 'beute', label: 'Beutensystem', typ: 'select', opts: BEUTEN },
     { k: 'koeniginJahr', label: 'Königin Schlupfjahr', typ: 'number', step: 1 },
     { k: 'rasse', label: 'Rasse', typ: 'select', opts: ['Carnica', 'Buckfast', 'Dunkle Biene', 'Ligustica', 'Sonstige'] },
     { k: 'koeniginHerkunft', label: 'Herkunft / Zuchtlinie' },
@@ -225,6 +230,7 @@ function zeigeStart() {
 
 // ---------- Standplätze ----------
 const hatKoord = s => s.lat != null && s.lon != null;
+const beutenAm = s => [...new Set(db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').map(v => v.beute))];
 function zeigeStandorte() {
   main().innerHTML = kopf('Standplätze', `<button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
     `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button>
@@ -532,66 +538,78 @@ function zeigeAufgaben() {
   const t = heute(), sort = (a, b) => (a.faellig || '9').localeCompare(b.faellig || '9');
   const zeile = a => [`<input type="checkbox" ${a.erledigt ? 'checked' : ''} onchange="abhaken('${a.id}')">`, `${a.erledigt ? '<s>' : ''}${esc(a.titel)}${a.erledigt ? '</s>' : ''}${a.notiz ? `<div class="leise klein-t">${esc(a.notiz)}</div>` : ''}`,
     a.faellig ? marke(fmtD(a.faellig), a.erledigt ? '' : a.faellig < t ? 'rot' : a.faellig === t ? 'gelb' : '') : '–', vName(a.volkId), sName(a.standortId), `<button class="klein" onclick="bearbeiten('aufgaben','${a.id}')">✎</button>`];
+  const an = db.einstellungen.push && window.Notification?.permission === 'granted';
   main().innerHTML = kopf('Aufgaben', `<button class="haupt" onclick="bearbeiten('aufgaben')">+ Aufgabe</button>`) +
+    `<div class="karte" style="margin-bottom:12px"><div class="kopf" style="margin:0"><div><b>Benachrichtigungen</b> ${marke(an ? 'ein' : 'aus', an ? 'gruen' : '')}
+      <div class="leise klein-t">Meldet fällige Aufgaben und den Beginn wichtiger Arbeiten (z. B. Kirschblüte → Honigraum aufsetzen) mit dem besten Tag laut Wettervorhersage.</div>
+      ${an ? `<div class="leise klein-t">${db.einstellungen.hintergrund ? 'Auf diesem Gerät prüft die App auch im Hintergrund, etwa einmal täglich.' : 'Auf diesem Gerät erscheinen die Meldungen beim Öffnen der App. Die Hintergrundprüfung gibt es nur in der installierten App unter Android/Chrome.'}</div>` : ''}</div>
+      <button onclick="pushUmschalten()">${an ? 'Ausschalten' : 'Einschalten'}</button></div></div><div id="vorschlaege"></div>` +
     tabelle(['', 'Aufgabe', 'Fällig', 'Volk', 'Standplatz', ''], db.aufgaben.filter(a => !a.erledigt).sort(sort).map(zeile)) +
     (db.aufgaben.some(a => a.erledigt) ? '<h3>Erledigt</h3>' + tabelle(['', 'Aufgabe', 'Fällig', 'Volk', 'Standplatz', ''], db.aufgaben.filter(a => a.erledigt).sort(sort).reverse().slice(0, 20).map(zeile)) : '');
+  ladeVorschlaege();
+}
+// Fällige Arbeiten je Standplatz und Beutentyp, abgestimmt auf die Wettervorhersage
+let vorschlagListe = [];
+async function ladeVorschlaege() {
+  const liste = [];
+  for (const s of db.standorte.filter(hatKoord)) {
+    const gruppen = new Map(beutenAm(s).map(b => [beuteGruppe(b), b]));
+    if (!gruppen.size) continue;
+    let d; try { d = await wetter(s); } catch { continue; }
+    for (const [gruppe, beute] of gruppen) for (const m of meilensteine(beute, d, heute())) {
+      const key = hinweisKey(heute(), s.id, gruppe, m);
+      if (m.stand === 'jetzt' && !db.vorschlaege[key] && !liste.some(v => v.key === key)) liste.push({ key, s, m, beute: m.allgemein ? 'alle Beuten' : beute });
+    }
+  }
+  vorschlagListe = liste;
+  const el = $('#vorschlaege'); if (!el || ansicht !== 'aufgaben') return;
+  el.innerHTML = !liste.length ? '' : '<h3>Vorschläge aus Vegetation und Wetter</h3>' + liste.map((v, i) => `<div class="karte" style="margin-bottom:8px">
+    <h4>${esc(v.m.titel)} <span class="leise klein-t">${esc(v.s.name)} · ${esc(v.beute)}</span></h4><div class="klein-t">${esc(v.m.pflanze)} – ${esc(v.m.text)}</div>
+    ${v.m.empf ? `<div><b>${esc(v.m.empf.text)}</b></div>` : ''}
+    <div class="zeile" style="margin-top:8px"><button class="haupt klein" onclick="vorschlag(${i},1)">Als Aufgabe übernehmen</button><button class="klein" onclick="vorschlag(${i},0)">Ausblenden</button></div></div>`).join('') + '<h3>Meine Aufgaben</h3>';
+}
+function vorschlag(i, uebernehmen) {
+  const v = vorschlagListe[i];
+  db.vorschlaege[v.key] = 1;
+  if (uebernehmen) db.aufgaben.push({ id: uid(), titel: v.m.titel, faellig: v.m.empf?.datum || heute(), standortId: v.s.id, volkId: '', notiz: v.m.text + (v.m.empf ? ' ' + v.m.empf.text : '') });
+  speichern(); render();
+}
+async function pushUmschalten() {
+  if (db.einstellungen.push && window.Notification?.permission === 'granted') { db.einstellungen.push = false; speichern(); return render(); }
+  if (!('Notification' in window) || !navigator.serviceWorker) return alert('Dieser Browser unterstützt keine Benachrichtigungen. Am iPhone muss die App zuerst zum Home-Bildschirm hinzugefügt werden.');
+  if (await Notification.requestPermission() !== 'granted') return alert('Benachrichtigungen wurden nicht erlaubt. Bitte in den Browser-Einstellungen für diese Seite freigeben.');
+  const reg = await navigator.serviceWorker.ready;
+  db.einstellungen.push = true; db.einstellungen.hintergrund = false;
+  try { await reg.periodicSync.register('imkerei-check', { minInterval: 12 * 3600e3 }); db.einstellungen.hintergrund = true; } catch { /* nur installierte App unter Android/Chrome */ }
+  speichern(); render(); meldeJetzt();
+}
+async function meldeJetzt() {
+  if (!db.einstellungen.push || window.Notification?.permission !== 'granted' || !navigator.serviceWorker) return;
+  const reg = await navigator.serviceWorker.ready;
+  await statusSpiegeln();
+  benachrichtige(h => reg.showNotification(h.titel, { body: h.text, icon: 'icon-192.png', badge: 'icon-192.png', tag: h.key })).catch(() => {});
 }
 function abhaken(id) { const a = db.aufgaben.find(x => x.id === id); a.erledigt = !a.erledigt; speichern(); render(); }
 
 // ---------- Vegetation & Wetter (Open-Meteo, ortsbezogen) ----------
-const WETTERCODE = [[0, '☀️ klar'], [2, '🌤️ heiter'], [3, '☁️ bedeckt'], [48, '🌫️ Nebel'], [57, '🌦️ Niesel'], [67, '🌧️ Regen'], [77, '🌨️ Schnee'], [82, '🌧️ Schauer'], [86, '🌨️ Schneeschauer'], [99, '⛈️ Gewitter']];
-const wetterText = c => (WETTERCODE.find(([max]) => c <= max) || WETTERCODE[0])[1];
-const flug = t => t.tmax >= 14 && t.regen < 1 && t.wind < 25 ? ['gruen', 'gut'] : t.tmax >= 10 && t.regen < 5 && t.wind < 40 ? ['gelb', 'mäßig'] : ['rot', 'kein Flug'];
-
 async function wetter(s) {
   const ck = 'imkerei-wx-' + s.id, c = JSON.parse(localStorage.getItem(ck) || 'null');
-  if (c && Date.now() - c.t < 3600e3 && c.lat === s.lat && c.lon === s.lon) return c.d;
-  const hole = async url => { const r = await fetch(url); if (!r.ok) throw new Error(r.status); return r.json(); };
-  const jahr = new Date().getFullYear(), ende = iso(new Date(Date.now() - 6 * 864e5)), q = `latitude=${s.lat}&longitude=${s.lon}&timezone=auto`;
-  const [fc, ar, aq] = await Promise.all([
-    hole(`https://api.open-meteo.com/v1/forecast?${q}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max&past_days=14&forecast_days=7`),
-    ende > `${jahr}-01-01` ? hole(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${jahr}-01-01&end_date=${ende}&daily=temperature_2m_mean`).catch(() => null) : null,
-    hole(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&current=alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen`).catch(() => null)]);
-  const mittel = {};
-  ar?.daily.time.forEach((d, i) => { if (ar.daily.temperature_2m_mean[i] != null) mittel[d] = ar.daily.temperature_2m_mean[i]; });
-  fc.daily.time.forEach((d, i) => { if (fc.daily.temperature_2m_mean[i] != null) mittel[d] = fc.daily.temperature_2m_mean[i]; });
-  // Grünlandtemperatursumme: positive Tagesmittel ab 1.1., Jänner ×0,5, Februar ×0,75
-  let gts = 0, fehlend = 0, beginn = null; const verlauf = [];
-  for (let d = new Date(jahr, 0, 1); iso(d) <= heute(); d.setDate(d.getDate() + 1)) {
-    const t = mittel[iso(d)];
-    if (t == null) fehlend++; else if (t > 0) gts += t * (d.getMonth() === 0 ? 0.5 : d.getMonth() === 1 ? 0.75 : 1);
-    if (!beginn && gts >= 200) beginn = iso(d);
-    verlauf.push(Math.round(gts));
-  }
-  const tage = fc.daily.time.map((d, i) => ({ datum: d, code: fc.daily.weather_code[i], tmax: fc.daily.temperature_2m_max[i], tmin: fc.daily.temperature_2m_min[i], regen: fc.daily.precipitation_sum[i] ?? 0, wind: fc.daily.wind_speed_10m_max[i] ?? 0 })).filter(t => t.datum >= heute() && t.tmax != null);
-  const d = { gts, fehlend, beginn, verlauf, tage, pollen: aq?.current || null,
-    jetzt: { temp: fc.current.temperature_2m, feuchte: fc.current.relative_humidity_2m, wind: fc.current.wind_speed_10m, code: fc.current.weather_code } };
-  localStorage.setItem(ck, JSON.stringify({ t: Date.now(), lat: s.lat, lon: s.lon, d }));
+  if (c && c.v === 2 && Date.now() - c.t < 3600e3 && c.lat === s.lat && c.lon === s.lon) return c.d;
+  const d = await holeWetter(s.lat, s.lon);
+  localStorage.setItem(ck, JSON.stringify({ v: 2, t: Date.now(), lat: s.lat, lon: s.lon, d }));
   return d;
 }
 
-const PHASEN = [
-  [30, 'Winter', 'Vegetationsruhe', 'Völker in Ruhe lassen, Fluglöcher und Futtervorrat (Gewicht) kontrollieren. Restentmilbung bei Brutfreiheit.'],
-  [200, 'Vorfrühling', 'Hasel, Erle, Schneeglöckchen, Salweide', 'Reinigungsflug beobachten, Futterkontrolle, Böden reinigen, Tränke aufstellen.'],
-  [430, 'Erstfrühling', 'Forsythie, Kirsche, Schlehe, Löwenzahn', 'Frühjahrsdurchsicht, Brutnest prüfen, Baurahmen geben, Honigraum zur Kirschblüte aufsetzen.'],
-  [800, 'Vollfrühling', 'Apfel, Raps, Rosskastanie', 'Schwarmkontrolle alle 7–9 Tage, erweitern, Ableger bilden, Drohnenbrut schneiden.'],
-  [1200, 'Frühsommer', 'Robinie, Holunder, Himbeere', 'Frühtracht schleudern, Schwarmkontrolle fortsetzen, Königinnenzucht.'],
-  [1900, 'Hochsommer', 'Linde, Edelkastanie, Waldtracht', 'Sommertracht ernten, Varroabefall messen, nach Abschleudern behandeln.'],
-  [2500, 'Spätsommer', 'Heide, Sonnenblume, Phacelia', 'Sommerbehandlung, Auffütterung, Völker auf Weiselrichtigkeit prüfen und vereinigen.'],
-];
-const HERBST = { 9: ['Frühherbst', 'Efeu, Herbstzeitlose, Holunderreife', 'Einfütterung abschließen, Fluglöcher einengen, Varroakontrolle (Windel).'],
-  10: ['Vollherbst', 'Efeu, Laubverfärbung', 'Mäusegitter anbringen, Futtervorrat prüfen, Beuten sturmfest machen.'],
-  11: ['Spätherbst', 'Laubfall', 'Brutfreiheit abwarten, Winterbehandlung (Oxalsäure) vorbereiten, Material pflegen.'] };
-function phase(gts, datum) {
-  const m = +datum.slice(5, 7);
-  const [name, zeiger, tipp] = m === 12 ? PHASEN[0].slice(1) : HERBST[m] && (m > 9 || gts >= 2500) ? HERBST[m] : (PHASEN.find(p => gts < p[0]) || PHASEN[6]).slice(1);
-  return { name, zeiger, tipp };
+let vegBeute = null;
+function arbeitenHtml(s, d) {
+  const da = beutenAm(s), beute = BEUTEN.includes(vegBeute) ? vegBeute : da[0] || 'Zander', farbe = { jetzt: 'gruen', kommt: 'gelb', vorbei: '' };
+  return `<div class="kopf" style="margin-top:20px"><h3 style="margin:0">Wichtige Arbeiten im Jahreslauf</h3>
+      <select style="width:auto" onchange="vegBeute=this.value;render()">${BEUTEN.map(b => `<option value="${b}" ${b === beute ? 'selected' : ''}>${b}${da.includes(b) ? ' ●' : ''}</option>`).join('')}</select></div>` +
+    tabelle(['Arbeit', 'Zeigerpflanze / Zeitpunkt', 'Stand'], meilensteine(beute, d, heute()).map(m => [
+      `<b>${esc(m.titel)}</b><div class="klein-t ${m.stand === 'jetzt' ? '' : 'leise'}">${esc(m.text)}</div>`, esc(m.pflanze),
+      marke(m.stand === 'jetzt' ? 'jetzt fällig' : m.stand === 'kommt' ? m.wann : 'vorbei', farbe[m.stand]) + (m.empf ? `<div class="klein-t">${esc(m.empf.text)}</div>` : '')])) +
+    '<p class="leise klein-t">● = Beutentyp steht an diesem Standplatz. Zeitpunkte sind Richtwerte aus Wärmesumme und Wettervorhersage – die eigene Beobachtung am Volk geht vor.</p>';
 }
-// Geschätzte Blühfenster nach Grünlandtemperatursumme (Richtwerte)
-const TRACHTEN = [['Hasel', 30, 150, 'Pollen'], ['Erle', 50, 170, 'Pollen'], ['Salweide', 150, 300, 'Nektar + Pollen'], ['Kirsche / Schlehe', 300, 420, 'Nektar + Pollen'], ['Löwenzahn', 360, 560, 'Nektar + Pollen'],
-  ['Apfel / Obstblüte', 430, 560, 'Nektar + Pollen'], ['Raps', 450, 720, 'Nektar + Pollen'], ['Rosskastanie', 520, 700, 'Nektar + Pollen'], ['Robinie (Akazie)', 800, 980, 'Nektar'], ['Himbeere / Brombeere', 900, 1500, 'Nektar + Pollen'],
-  ['Linde', 1200, 1650, 'Nektar + Honigtau'], ['Edelkastanie', 1350, 1700, 'Nektar + Pollen'], ['Sonnenblume', 1700, 2300, 'Nektar + Pollen'], ['Phacelia / Buchweizen', 1900, 2900, 'Nektar'], ['Heide', 2300, 2900, 'Nektar'], ['Efeu', 2900, 4200, 'Nektar + Pollen']];
-const POLLEN = { alder_pollen: 'Erle', birch_pollen: 'Birke', grass_pollen: 'Gräser', mugwort_pollen: 'Beifuß', ragweed_pollen: 'Ragweed' };
 
 async function zeigeVegetation() {
   const mit = db.standorte.filter(hatKoord);
@@ -610,6 +628,7 @@ async function zeigeVegetation() {
       <div class="karte"><div class="leise klein-t">Grünlandtemperatursumme</div><h4>${zahl(d.gts, 0)}</h4>${d.beginn ? `Vegetationsbeginn (200) am ${fmtD(d.beginn)}` : `noch ${zahl(200 - d.gts, 0)} bis Vegetationsbeginn`}${d.fehlend ? `<div class="leise klein-t">${d.fehlend} Tage ohne Messwert</div>` : ''}</div>
       <div class="karte"><div class="leise klein-t">Phänologische Jahreszeit</div><h4>${esc(p.name)}</h4><span class="klein-t">Zeigerpflanzen: ${esc(p.zeiger)}</span></div></div>
     <ul class="hinweise" style="margin-top:12px"><li class="gruen"><b>Am Bienenstand jetzt:</b> ${esc(p.tipp)}</li></ul>
+    ${arbeitenHtml(s, d)}
     <h3>Flugwetter – 7 Tage</h3><div class="tage">${d.tage.map(t => { const f = flug(t); return `<div class="karte"><div class="klein-t">${new Date(t.datum).toLocaleDateString('de-AT', { weekday: 'short', day: 'numeric', month: 'numeric' })}</div><div class="gross">${wetterText(t.code).split(' ')[0]}</div>
       <b>${zahl(t.tmax, 0)}°</b> / ${zahl(t.tmin, 0)}°<div class="leise klein-t">${zahl(t.regen)} mm · ${zahl(t.wind, 0)} km/h</div>${marke(f[1], f[0])}</div>`; }).join('')}</div>
     <h3>Trachtkalender (Schätzung für diesen Ort)</h3>` +
@@ -637,7 +656,7 @@ function zeigeDaten() {
   main().innerHTML = kopf('Daten') + `<div class="karte"><p>Alle Einträge werden nur in diesem Browser auf diesem Gerät gespeichert. Sichere sie regelmäßig als Datei. Die Fotos der Varroa-Zählungen sind in der Sicherung nicht enthalten – lade sie bei Bedarf einzeln herunter.</p>
     <div class="zeile"><button class="haupt" onclick="herunterladen('imkerei-sicherung-${heute()}.json', JSON.stringify(db, null, 1), 'application/json')">Sicherung herunterladen</button>
     <label class="btn">Sicherung einspielen <input type="file" accept=".json" hidden onchange="einspielen(this.files[0])"></label></div></div>
-    <p class="leise klein-t">${Object.entries(db).map(([k, v]) => `${k}: ${v.length}`).join(' · ')}</p>`;
+    <p class="leise klein-t">${Object.entries(db).filter(([, v]) => Array.isArray(v)).map(([k, v]) => `${k}: ${v.length}`).join(' · ')}</p>`;
 }
 async function einspielen(datei) {
   if (!datei) return;
@@ -652,3 +671,4 @@ async function einspielen(datei) {
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.(); // Browser bitten, die Daten nicht automatisch zu löschen
 render();
+statusSpiegeln(); meldeJetzt();

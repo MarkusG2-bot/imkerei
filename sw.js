@@ -1,10 +1,11 @@
-// Service Worker: App funktioniert auch ohne Empfang am Bienenstand.
-const CACHE = 'imkerei-v1';
-const DATEIEN = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
+// Service Worker: App funktioniert auch ohne Empfang am Bienenstand und meldet fällige Arbeiten.
+importScripts('fachlogik.js');
+const CACHE = 'imkerei-v2';
+const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(DATEIEN)).then(() => self.skipWaiting())));
-self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
+self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== 'imkerei-status').map(k => caches.delete(k)))).then(() => self.clients.claim())));
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
@@ -15,4 +16,13 @@ self.addEventListener('fetch', e => {
     if (r.ok) { const kopie = r.clone(); caches.open(CACHE).then(c => c.put(e.request, kopie)); }
     return r;
   }).catch(() => caches.match(e.request, { ignoreSearch: true })));
+});
+
+// Hintergrundprüfung (nur installierte App unter Android/Chrome, Abstand bestimmt der Browser)
+self.addEventListener('periodicsync', e => {
+  if (e.tag === 'imkerei-check') e.waitUntil(benachrichtige(h => self.registration.showNotification(h.titel, { body: h.text, icon: 'icon-192.png', badge: 'icon-192.png', tag: h.key })));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then(cs => cs[0] ? cs[0].focus() : self.clients.openWindow('./')));
 });
