@@ -143,10 +143,23 @@ function meilensteine(beute, d, tag) {
 async function statusLesen(name) { const r = await (await caches.open('imkerei-status')).match('status/' + name); return r ? r.json() : null; }
 async function statusSchreiben(name, wert) { await (await caches.open('imkerei-status')).put('status/' + name, new Response(JSON.stringify(wert))); }
 
+// VIS-Meldung (Österreich): Stichtage 30.4. und 31.10., zu melden bis 30.6. bzw. 31.12.
+const VIS_LINK = 'https://vis.statistik.at/';
+function visFenster(tag) {
+  const j = tag.slice(0, 4), md = tag.slice(5);
+  return md >= '04-30' && md <= '06-30' ? { id: j + '-F', stichtag: `30.04.${j}`, frist: `30.06.${j}` }
+    : md >= '10-31' ? { id: j + '-H', stichtag: `31.10.${j}`, frist: `31.12.${j}` } : null;
+}
+const meldungOptionen = h => ({ body: h.text, icon: 'icon-192.png', badge: 'icon-192.png', tag: h.ersetzt || h.key, data: { url: h.url || null },
+  actions: h.url ? [{ action: 'link', title: 'Zum VIS anmelden' }, { action: 'app', title: 'App öffnen' }] : [] });
+
 // Arbeiten ohne beutenspezifischen Text zählen je Standplatz nur einmal
 const hinweisKey = (tag, standortId, gruppe, m) => `${tag.slice(0, 4)}|${standortId}|${m.allgemein ? '*' : gruppe}|${m.id}`;
 async function sammleHinweise(st) {
-  const tag = heute(), liste = [];
+  const tag = heute(), liste = [], vis = visFenster(tag);
+  // Mit Bestätigungspflicht enthält der Schlüssel das Datum: Erinnerung kommt täglich, bis bestätigt wurde
+  if (vis && st.vis && !st.vis.aus && !st.vis.bestaetigt[vis.id]) liste.push({ key: st.vis.ohneBestaetigung ? `vis|${vis.id}` : `vis|${vis.id}|${tag}`, ersetzt: `vis|${vis.id}`, url: VIS_LINK,
+    titel: 'VIS-Meldung fällig', text: `Stichtag ${vis.stichtag}: ${st.vis.voelker} Völker an ${st.vis.standorte} Standplätzen melden, Frist ${vis.frist}.${st.vis.ohneBestaetigung ? '' : ' Danach in der App bestätigen.'}` });
   for (const a of st.aufgaben) if (a.faellig <= tag) liste.push({ key: `a|${a.id}|${a.faellig}`, titel: a.faellig < tag ? 'Aufgabe überfällig' : 'Aufgabe heute fällig', text: a.titel });
   for (const s of st.standorte) {
     if (!s.beuten.length) continue;

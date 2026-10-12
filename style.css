@@ -64,4 +64,6 @@ svg.diagramm { width: 100%; height: 200px; background: var(--karte); border: 1px
 .vz-rahmen { overflow: auto; max-height: 78vh; border: 1px solid var(--rand); border-radius: 8px; }
 .vz-rahmen canvas { display: block; cursor: crosshair; }
 a.btn { text-decoration: none; }
+a.btn.haupt { background: var(--honig); border-color: var(--honig-dunkel); font-weight: 600; }
+label.check { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 14px; }
 @media (max-width: 520px) { dialog .felder { grid-template-columns: 1fr; } #karte { height: 320px; } }

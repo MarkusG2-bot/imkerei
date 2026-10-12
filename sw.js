@@ -20,9 +20,10 @@ self.addEventListener('fetch', e => {
 
 // Hintergrundprüfung (nur installierte App unter Android/Chrome, Abstand bestimmt der Browser)
 self.addEventListener('periodicsync', e => {
-  if (e.tag === 'imkerei-check') e.waitUntil(benachrichtige(h => self.registration.showNotification(h.titel, { body: h.text, icon: 'icon-192.png', badge: 'icon-192.png', tag: h.key })));
+  if (e.tag === 'imkerei-check') e.waitUntil(benachrichtige(h => self.registration.showNotification(h.titel, meldungOptionen(h))));
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  if (e.action === 'link' && e.notification.data?.url) return e.waitUntil(self.clients.openWindow(e.notification.data.url));
   e.waitUntil(self.clients.matchAll({ type: 'window' }).then(cs => cs[0] ? cs[0].focus() : self.clients.openWindow('./')));
 });

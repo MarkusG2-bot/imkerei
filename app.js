@@ -1,6 +1,6 @@
 // ---------- Daten ----------
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {} });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {} });
 let db = laden();
 function laden() { try { return Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return leer(); } }
 function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpiegeln(); }
@@ -9,8 +9,21 @@ function statusSpiegeln() {
   if (!window.caches) return Promise.resolve();
   return statusSchreiben('daten', { push: !!db.einstellungen.push,
     standorte: db.standorte.filter(hatKoord).map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, beuten: beutenAm(s) })),
-    aufgaben: db.aufgaben.filter(a => !a.erledigt && a.faellig).map(a => ({ id: a.id, titel: a.titel, faellig: a.faellig })) }).catch(() => {});
+    aufgaben: db.aufgaben.filter(a => !a.erledigt && a.faellig).map(a => ({ id: a.id, titel: a.titel, faellig: a.faellig })),
+    vis: { aus: !!db.einstellungen.visAus, ohneBestaetigung: !!db.einstellungen.visOhneBestaetigung, bestaetigt: db.visBestaetigt,
+      voelker: db.voelker.filter(v => v.status !== 'aufgelöst').length, standorte: db.standorte.length } }).catch(() => {});
 }
+// VIS-Meldung: Karte mit Zahlen je Standplatz, Link zur Anmeldung und Bestätigung
+function visKarte() {
+  const f = visFenster(heute());
+  if (!f || db.einstellungen.visAus || db.visBestaetigt[f.id]) return '';
+  const aktiv = db.voelker.filter(v => v.status !== 'aufgelöst');
+  return `<div class="karte" style="border-color:var(--honig);margin-bottom:12px"><h4>VIS-Meldung fällig</h4>Stichtag ${f.stichtag}, zu melden bis ${f.frist}.
+    <div class="klein-t" style="margin:6px 0">${db.standorte.map(s => `${esc(s.name)}${s.regnr ? ` (${esc(s.regnr)})` : ''}: <b>${aktiv.filter(v => v.standortId === s.id).length}</b> Völker`).join('<br>') || 'Noch keine Standplätze eingetragen.'}
+      <br>Gesamt: <b>${aktiv.length}</b> Völker (aktueller Stand in der App)</div>
+    <div class="zeile"><a class="btn haupt" href="${VIS_LINK}" target="_blank" rel="noopener">Zum VIS anmelden</a><button onclick="visErledigt('${f.id}')">Meldung erledigt</button></div></div>`;
+}
+function visErledigt(id) { db.visBestaetigt[id] = heute(); speichern(); render(); }
 
 const $ = s => document.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -212,7 +225,7 @@ function zeigeStart() {
   const honig = db.ernten.filter(e => e.produkt === 'Honig' && e.datum?.startsWith(jahr)).reduce((s, e) => s + (e.kg || 0), 0);
   const aktiv = db.voelker.filter(v => v.status !== 'aufgelöst');
   const h = alleHinweise();
-  main().innerHTML = kopf('Übersicht') + `<div class="raster">
+  main().innerHTML = kopf('Übersicht') + visKarte() + `<div class="raster">
     <div class="karte kachel klick" onclick="gehe('standorte')"><b>${db.standorte.length}</b>Standplätze</div>
     <div class="karte kachel klick" onclick="gehe('voelker')"><b>${aktiv.length}</b>Völker</div>
     <div class="karte kachel klick" onclick="gehe('ernten')"><b>${zahl(honig)} kg</b>Honig ${jahr}${aktiv.length ? ` · ⌀ ${zahl(honig / aktiv.length)} kg/Volk` : ''}</div>
@@ -543,7 +556,10 @@ function zeigeAufgaben() {
     `<div class="karte" style="margin-bottom:12px"><div class="kopf" style="margin:0"><div><b>Benachrichtigungen</b> ${marke(an ? 'ein' : 'aus', an ? 'gruen' : '')}
       <div class="leise klein-t">Meldet fällige Aufgaben und den Beginn wichtiger Arbeiten (z. B. Kirschblüte → Honigraum aufsetzen) mit dem besten Tag laut Wettervorhersage.</div>
       ${an ? `<div class="leise klein-t">${db.einstellungen.hintergrund ? 'Auf diesem Gerät prüft die App auch im Hintergrund, etwa einmal täglich.' : 'Auf diesem Gerät erscheinen die Meldungen beim Öffnen der App. Die Hintergrundprüfung gibt es nur in der installierten App unter Android/Chrome.'}</div>` : ''}</div>
-      <button onclick="pushUmschalten()">${an ? 'Ausschalten' : 'Einschalten'}</button></div></div><div id="vorschlaege"></div>` +
+      <button onclick="pushUmschalten()">${an ? 'Ausschalten' : 'Einschalten'}</button></div>
+      <label class="check"><input type="checkbox" ${db.einstellungen.visAus ? '' : 'checked'} onchange="db.einstellungen.visAus=!this.checked;speichern();render()"> An die VIS-Meldung erinnern (ab den Stichtagen 30.4. und 31.10.)</label>
+      <label class="check"><input type="checkbox" ${db.einstellungen.visOhneBestaetigung ? '' : 'checked'} ${db.einstellungen.visAus ? 'disabled' : ''} onchange="db.einstellungen.visOhneBestaetigung=!this.checked;speichern()"> VIS-Meldung muss in der App bestätigt werden – bis dahin täglich erinnern</label></div>
+    ${visKarte()}<div id="vorschlaege"></div>` +
     tabelle(['', 'Aufgabe', 'Fällig', 'Volk', 'Standplatz', ''], db.aufgaben.filter(a => !a.erledigt).sort(sort).map(zeile)) +
     (db.aufgaben.some(a => a.erledigt) ? '<h3>Erledigt</h3>' + tabelle(['', 'Aufgabe', 'Fällig', 'Volk', 'Standplatz', ''], db.aufgaben.filter(a => a.erledigt).sort(sort).reverse().slice(0, 20).map(zeile)) : '');
   ladeVorschlaege();
@@ -587,7 +603,7 @@ async function meldeJetzt() {
   if (!db.einstellungen.push || window.Notification?.permission !== 'granted' || !navigator.serviceWorker) return;
   const reg = await navigator.serviceWorker.ready;
   await statusSpiegeln();
-  benachrichtige(h => reg.showNotification(h.titel, { body: h.text, icon: 'icon-192.png', badge: 'icon-192.png', tag: h.key })).catch(() => {});
+  benachrichtige(h => reg.showNotification(h.titel, meldungOptionen(h))).catch(() => {});
 }
 function abhaken(id) { const a = db.aufgaben.find(x => x.id === id); a.erledigt = !a.erledigt; speichern(); render(); }
 
