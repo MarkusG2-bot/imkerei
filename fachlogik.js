@@ -60,6 +60,15 @@ function phase(gts, datum) {
 const TRACHTEN = [['Hasel', 30, 150, 'Pollen'], ['Erle', 50, 170, 'Pollen'], ['Salweide', 150, 300, 'Nektar + Pollen'], ['Kirsche / Schlehe', 300, 420, 'Nektar + Pollen'], ['Löwenzahn', 360, 560, 'Nektar + Pollen'],
   ['Apfel / Obstblüte', 430, 560, 'Nektar + Pollen'], ['Raps', 450, 720, 'Nektar + Pollen'], ['Rosskastanie', 520, 700, 'Nektar + Pollen'], ['Robinie (Akazie)', 800, 980, 'Nektar'], ['Himbeere / Brombeere', 900, 1500, 'Nektar + Pollen'],
   ['Linde', 1200, 1650, 'Nektar + Honigtau'], ['Edelkastanie', 1350, 1700, 'Nektar + Pollen'], ['Sonnenblume', 1700, 2300, 'Nektar + Pollen'], ['Phacelia / Buchweizen', 1900, 2900, 'Nektar'], ['Heide', 2300, 2900, 'Nektar'], ['Efeu', 2900, 4200, 'Nektar + Pollen']];
+// Eigene Blühbeobachtungen [{pflanze, gts}] → Standortfaktor k und beobachteter Blühbeginn je Pflanze
+function standortFaktor(beob) {
+  const je = {}; let ist = 0, soll = 0;
+  for (const [name, von] of TRACHTEN) {
+    const g = beob.filter(b => b.pflanze === name && b.gts > 0).map(b => b.gts);
+    if (g.length) { je[name] = g.reduce((a, b) => a + b) / g.length; ist += je[name]; soll += von; }
+  }
+  return { k: soll ? Math.min(1.6, Math.max(0.6, ist / soll)) : 1, je, n: Object.keys(je).length };
+}
 const POLLEN = { alder_pollen: 'Erle', birch_pollen: 'Birke', grass_pollen: 'Gräser', mugwort_pollen: 'Beifuß', ragweed_pollen: 'Ragweed' };
 
 // ---------- Arbeiten im Jahreslauf ----------
@@ -119,9 +128,11 @@ function besterTag(tage, art) {
 }
 
 // Liefert alle Arbeiten für einen Beutentyp mit Stand (kommt / jetzt / vorbei), Zeitprognose und Wetterempfehlung
-function meilensteine(beute, d, tag) {
+// k = Standortfaktor aus eigenen Blühbeobachtungen (1 = Richtwert)
+function meilensteine(beute, d, tag, k = 1) {
   const md = tag.slice(5), monat = +tag.slice(5, 7), gruppe = beuteGruppe(beute);
-  return MEILENSTEINE.map(m => {
+  return MEILENSTEINE.map(m0 => {
+    const m = m0.von != null ? { ...m0, von: Math.round(m0.von * k), bis: Math.round(m0.bis * k) } : m0;
     const [titel, text] = m.beute ? m.beute[gruppe] : [m.titel, m.text];
     const imGts = m.von != null && d.gts >= m.von && d.gts <= m.bis && monat < 11, imDatum = m.ab != null && md >= m.ab && md <= m.bisTag;
     let stand = 'vorbei', wann = '', empf = null;
@@ -165,7 +176,7 @@ async function sammleHinweise(st) {
     if (!s.beuten.length) continue;
     let d; try { d = await holeWetter(s.lat, s.lon); } catch { continue; }
     for (const [gruppe, beute] of new Map(s.beuten.map(b => [beuteGruppe(b), b])))
-      for (const m of meilensteine(beute, d, tag)) if (m.stand === 'jetzt' && !liste.some(h => h.key === hinweisKey(tag, s.id, gruppe, m)))
+      for (const m of meilensteine(beute, d, tag, s.k || 1)) if (m.stand === 'jetzt' && !liste.some(h => h.key === hinweisKey(tag, s.id, gruppe, m)))
         liste.push({ key: hinweisKey(tag, s.id, gruppe, m), titel: `${s.name}: ${m.titel}`, text: `${m.pflanze[0].toUpperCase() + m.pflanze.slice(1)}. ${m.text}${m.empf ? ' ' + m.empf.text + '.' : ''}` });
   }
   return liste;

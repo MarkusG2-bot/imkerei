@@ -1,6 +1,6 @@
 // ---------- Daten ----------
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {} });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [] });
 let db = laden();
 function laden() { try { return Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return leer(); } }
 function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpiegeln(); }
@@ -8,7 +8,7 @@ function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpie
 function statusSpiegeln() {
   if (!window.caches) return Promise.resolve();
   return statusSchreiben('daten', { push: !!db.einstellungen.push,
-    standorte: db.standorte.filter(hatKoord).map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, beuten: beutenAm(s) })),
+    standorte: db.standorte.filter(hatKoord).map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, beuten: beutenAm(s), k: standortFaktor(beobAm(s)).k })),
     aufgaben: db.aufgaben.filter(a => !a.erledigt && a.faellig).map(a => ({ id: a.id, titel: a.titel, faellig: a.faellig })),
     vis: { aus: !!db.einstellungen.visAus, ohneBestaetigung: !!db.einstellungen.visOhneBestaetigung, bestaetigt: db.visBestaetigt,
       voelker: db.voelker.filter(v => v.status !== 'aufgelöst').length, standorte: db.standorte.length } }).catch(() => {});
@@ -117,6 +117,18 @@ const DEF = {
     { k: 'preis', label: 'Stückpreis (€)', typ: 'number', step: 0.01 },
     { k: 'mhd', label: 'Haltbar bis', typ: 'date' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
+  buchungen: { titel: 'Buchung', neu: () => ({ datum: heute(), art: 'Ausgabe' }), felder: () => [
+    { k: 'datum', label: 'Datum', typ: 'date', req: 1 },
+    { k: 'art', label: 'Art', typ: 'select', opts: ['Ausgabe', 'Einnahme'] },
+    { k: 'betrag', label: 'Betrag (€)', typ: 'number', step: 0.01, min: 0, req: 1 },
+    { k: 'kategorie', label: 'Kategorie', liste: ['Honigverkauf', 'Wachs / Propolis', 'Völkerverkauf', 'Förderung', 'Futter', 'Behandlungsmittel', 'Gläser & Etiketten', 'Material', 'Königinnen / Völker', 'Fahrtkosten', 'Versicherung / Beiträge', 'Sonstiges'] },
+    { k: 'text', label: 'Beschreibung', breit: 1 }] },
+  investitionen: { titel: 'Investition', neu: () => ({ datum: heute(), jahre: 10 }), felder: () => [
+    { k: 'name', label: 'Anschaffung (z. B. Schleuder)', req: 1, breit: 1 },
+    { k: 'datum', label: 'Anschaffungsdatum', typ: 'date', req: 1 },
+    { k: 'betrag', label: 'Betrag (€)', typ: 'number', step: 0.01, min: 0, req: 1 },
+    { k: 'jahre', label: 'Nutzungsdauer (Jahre)', typ: 'number', step: 1, min: 1, req: 1 },
+    { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   aufgaben: { titel: 'Aufgabe', neu: () => ({ faellig: heute() }), felder: () => [
     { k: 'titel', label: 'Aufgabe', req: 1, breit: 1 },
     { k: 'faellig', label: 'Fällig am', typ: 'date' },
@@ -168,16 +180,17 @@ function bearbeiten(typ, id, vorgabe = {}) {
   formular(alt ? `${def.titel} bearbeiten` : `${def.titel} eintragen`, def.felder(), alt || { ...def.neu?.(), ...vorgabe },
     w => { if (alt) Object.assign(alt, w); else db[typ].push({ id: uid(), ...w }); speichern(); render(); },
     alt && (() => { db[typ] = db[typ].filter(x => x.id !== id); speichern(); if (typ === 'voelker') detailVolk = null; render(); }));
+  if (typ === 'durchsichten') sprachLeiste();
 }
 
 // ---------- Navigation ----------
-const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['daten', 'Daten']];
+const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['daten', 'Daten']];
 let ansicht = 'start', detailVolk = null, vegId = null, karte = null;
 function gehe(a) { ansicht = a; detailVolk = null; render(); scrollTo(0, 0); }
 function render() {
   $('#nav').innerHTML = ANSICHTEN.map(([k, l]) => `<button class="${k === ansicht ? 'aktiv' : ''}" onclick="gehe('${k}')">${l}</button>`).join('');
   if (karte) { karte.remove(); karte = null; }
-  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, daten: zeigeDaten })[ansicht]();
+  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, finanzen: zeigeFinanzen, vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, daten: zeigeDaten })[ansicht]();
 }
 const main = () => $('#main');
 const kopf = (titel, knoepfe = '') => `<div class="kopf"><h2>${titel}</h2><div class="zeile">${knoepfe}</div></div>`;
@@ -248,12 +261,12 @@ function zeigeStandorte() {
   main().innerHTML = kopf('Standplätze', `<button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
     `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button>
      <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = 3 km Flugradius.</span></div>
-    <div id="karte"></div>` +
+    <div id="karte"></div><div id="tracht-info"></div>` +
     tabelle(['Name', 'Art', 'Völker', 'Koordinaten', 'Reg.-Nr.', 'Tracht', ''], db.standorte.map(s => [
       `<b>${esc(s.name)}</b>${s.notiz ? `<div class="leise klein-t">${esc(s.notiz)}</div>` : ''}`, esc(s.typ),
       db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length,
       hatKoord(s) ? `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : marke('fehlen', 'gelb'), esc(s.regnr), esc(s.tracht),
-      `<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button>`]));
+      `<div class="zeile">${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`]));
   $('#ortsuche').onkeydown = e => { if (e.key === 'Enter') ortSuchen(); };
   if (!window.L) { $('#karte').outerHTML = '<p class="leer">Karte nicht verfügbar (keine Internetverbindung). Koordinaten können von Hand eingetragen werden.</p>'; return; }
   karte = L.map('karte').setView([47.6, 14.1], 7);
@@ -313,7 +326,7 @@ function zeigeVolk(v) {
     `<div class="karte"><b>${sName(v.standortId)}</b> · ${esc(v.beute)} · Status ${esc(v.status)}<br>
       Königin: ${koeniginPunkt(v.koeniginJahr) || '–'} · ${esc(v.rasse)}${v.koeniginHerkunft ? ' · ' + esc(v.koeniginHerkunft) : ''}${v.gezeichnet ? ' · gezeichnet' : ''}<br>
       Honigertrag gesamt: ${zahl(honig)} kg ${volkHinweise(v).map(([f, t]) => marke(t, f)).join(' ')}${v.notiz ? `<div class="leise">${esc(v.notiz)}</div>` : ''}</div>
-    <h3>Durchsichten</h3>` +
+    ${kurvenHtml(id)}<h3>Durchsichten</h3>` +
     tabelle(['Datum', 'Weisel', 'Zellen', 'Brut', 'Gassen', 'Futter', 'Sanftmut', 'Varroa/Tag', 'kg', 'Maßnahmen / Notiz', ''], ds.map(d => [
       fmtD(d.datum), marke(d.weisel, d.weisel === 'weisellos' ? 'rot' : d.weisel === 'unklar' ? 'gelb' : 'gruen'), esc(d.zellen), zahl(d.brutwaben), zahl(d.gassen), esc(d.futter), zahl(d.sanftmut),
       d.varroa == null ? '–' : marke(zahl(d.varroa), varroaFarbe(d.varroa)), zahl(d.gewicht), esc([d.massnahmen, d.notiz].filter(Boolean).join(' – ')),
@@ -509,7 +522,7 @@ async function vzExport() {
 
 // ---------- Bestandsbuch & Ernte ----------
 function zeigeBehandlungen() {
-  main().innerHTML = kopf('Bestandsbuch', `<button onclick="csvBehandlungen()">CSV exportieren</button><button class="haupt" onclick="bearbeiten('behandlungen')" ${db.voelker.length ? '' : 'disabled'}>+ Behandlung</button>`) +
+  main().innerHTML = kopf('Bestandsbuch', `<button onclick="bestandsbuchPdf()">PDF / Drucken</button><button onclick="csvBehandlungen()">CSV exportieren</button><button class="haupt" onclick="bearbeiten('behandlungen')" ${db.voelker.length ? '' : 'disabled'}>+ Behandlung</button>`) +
     '<p class="leise klein-t">Dokumentation der Anwendung von Tierarzneimitteln und biotechnischen Verfahren je Volk.</p>' +
     tabelle(['Beginn', 'Volk', 'Standplatz', 'Mittel / Verfahren', 'Menge', 'Charge', 'Ende', 'Wartezeit', 'Anwender', ''], [...db.behandlungen].sort(nachDatum).map(b => [
       fmtD(b.datum), vName(b.volkId), sName(volk(b.volkId)?.standortId), esc(b.mittel), esc(b.menge), esc(b.charge), fmtD(b.ende), b.wartezeit != null ? `${b.wartezeit} T.` : '–', esc(b.anwender),
@@ -572,7 +585,7 @@ async function ladeVorschlaege() {
     const gruppen = new Map(beutenAm(s).map(b => [beuteGruppe(b), b]));
     if (!gruppen.size) continue;
     let d; try { d = await wetter(s); } catch { continue; }
-    for (const [gruppe, beute] of gruppen) for (const m of meilensteine(beute, d, heute())) {
+    for (const [gruppe, beute] of gruppen) for (const m of meilensteine(beute, d, heute(), standortFaktor(beobAm(s)).k)) {
       const key = hinweisKey(heute(), s.id, gruppe, m);
       if (m.stand === 'jetzt' && !db.vorschlaege[key] && !liste.some(v => v.key === key)) liste.push({ key, s, m, beute: m.allgemein ? 'alle Beuten' : beute });
     }
@@ -621,7 +634,7 @@ function arbeitenHtml(s, d) {
   const da = beutenAm(s), beute = BEUTEN.includes(vegBeute) ? vegBeute : da[0] || 'Zander', farbe = { jetzt: 'gruen', kommt: 'gelb', vorbei: '' };
   return `<div class="kopf" style="margin-top:20px"><h3 style="margin:0">Wichtige Arbeiten im Jahreslauf</h3>
       <select style="width:auto" onchange="vegBeute=this.value;render()">${BEUTEN.map(b => `<option value="${b}" ${b === beute ? 'selected' : ''}>${b}${da.includes(b) ? ' ●' : ''}</option>`).join('')}</select></div>` +
-    tabelle(['Arbeit', 'Zeigerpflanze / Zeitpunkt', 'Stand'], meilensteine(beute, d, heute()).map(m => [
+    tabelle(['Arbeit', 'Zeigerpflanze / Zeitpunkt', 'Stand'], meilensteine(beute, d, heute(), standortFaktor(beobAm(s)).k).map(m => [
       `<b>${esc(m.titel)}</b><div class="klein-t ${m.stand === 'jetzt' ? '' : 'leise'}">${esc(m.text)}</div>`, esc(m.pflanze),
       marke(m.stand === 'jetzt' ? 'jetzt fällig' : m.stand === 'kommt' ? m.wann : 'vorbei', farbe[m.stand]) + (m.empf ? `<div class="klein-t">${esc(m.empf.text)}</div>` : '')])) +
     '<p class="leise klein-t">● = Beutentyp steht an diesem Standplatz. Zeitpunkte sind Richtwerte aus Wärmesumme und Wettervorhersage – die eigene Beobachtung am Volk geht vor.</p>';
@@ -648,9 +661,8 @@ async function zeigeVegetation() {
     <h3>Flugwetter – 7 Tage</h3><div class="tage">${d.tage.map(t => { const f = flug(t); return `<div class="karte"><div class="klein-t">${new Date(t.datum).toLocaleDateString('de-AT', { weekday: 'short', day: 'numeric', month: 'numeric' })}</div><div class="gross">${wetterText(t.code).split(' ')[0]}</div>
       <b>${zahl(t.tmax, 0)}°</b> / ${zahl(t.tmin, 0)}°<div class="leise klein-t">${zahl(t.regen)} mm · ${zahl(t.wind, 0)} km/h</div>${marke(f[1], f[0])}</div>`; }).join('')}</div>
     <h3>Trachtkalender (Schätzung für diesen Ort)</h3>` +
-    tabelle(['Trachtpflanze', 'Wert', 'Blühbeginn ab', 'Stand'], TRACHTEN.map(([name, von, bis, wert]) => [name, wert, `GTS ${von}`,
-      d.gts < von ? marke(`in ca. ${zahl(von - d.gts, 0)} Gradtagen`) : d.gts <= bis && monat < 11 ? marke('blüht voraussichtlich', 'gruen') : marke('vorbei')])) +
-    `<p class="leise klein-t">Blühfenster sind Richtwerte aus der Wärmesumme – die eigene Beobachtung am Stand geht vor.</p>
+    trachtTabelle(s, d) +
+    `<p class="leise klein-t">Blühfenster sind Richtwerte aus der Wärmesumme. Trage den Blühbeginn ein, den du am Stand siehst – die App passt Kalender und Arbeiten dann an diesen Standplatz an.</p>
     <h3>Pollenflug aktuell</h3>${!d.pollen ? '<p class="leer">Keine Pollendaten verfügbar.</p>' : pollen.length ? `<div class="zeile">${pollen.map(([name, v]) => marke(`${name}: ${zahl(v)} Körner/m³`, v > 50 ? 'rot' : v > 10 ? 'gelb' : 'gruen')).join('')}</div>` : '<p class="leer">Derzeit kein messbarer Pollenflug (Erle, Birke, Gräser, Beifuß, Ragweed).</p>'}
     <h3>Verlauf der Grünlandtemperatursumme ${heute().slice(0, 4)}</h3>
     <svg class="diagramm" viewBox="0 0 ${Math.max(n, 2)} 200" preserveAspectRatio="none"><line x1="0" x2="${n}" y1="${y(200)}" y2="${y(200)}" stroke="#3d8b40" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
