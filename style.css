@@ -1,0 +1,67 @@
+:root {
+  --bg: #faf6ec; --karte: #fff; --text: #2b2416; --leise: #7a6f5a; --rand: #e6dcc4;
+  --honig: #e0a100; --honig-dunkel: #a87400; --gruen: #3d8b40; --gelb: #d99a00; --rot: #c0392b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+header { background: #2b2416; color: #fff; position: sticky; top: 0; z-index: 1000; }
+header h1 { margin: 0; padding: 10px 16px 4px; font-size: 20px; }
+nav { display: flex; overflow-x: auto; padding: 0 8px; scrollbar-width: none; }
+nav button { background: none; border: 0; color: #d8cdb4; padding: 10px 12px; font: inherit; white-space: nowrap; cursor: pointer; border-bottom: 3px solid transparent; }
+nav button.aktiv { color: #fff; border-color: var(--honig); }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+h2 { margin: 4px 0 12px; }
+h3 { margin: 20px 0 8px; }
+.kopf { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.kopf h2 { margin: 0; }
+.zeile { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, .btn { font: inherit; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--rand); background: var(--karte); color: var(--text); cursor: pointer; }
+button.haupt { background: var(--honig); border-color: var(--honig-dunkel); font-weight: 600; }
+button.gefahr { color: var(--rot); }
+button.klein { padding: 3px 9px; }
+input, select, textarea { font: inherit; padding: 7px 9px; border: 1px solid var(--rand); border-radius: 8px; background: #fff; color: var(--text); width: 100%; }
+input[type=checkbox] { width: auto; }
+.raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.karte { background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; padding: 14px; }
+.karte.klick { cursor: pointer; }
+.karte.klick:hover { border-color: var(--honig); }
+.karte h4 { margin: 0 0 4px; font-size: 16px; }
+.kachel b { display: block; font-size: 28px; }
+.leise, .leer { color: var(--leise); }
+.klein-t { font-size: 13px; }
+.tw { overflow-x: auto; background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rand); vertical-align: top; }
+th { font-size: 13px; color: var(--leise); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.marke { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; background: #eee6d2; white-space: nowrap; }
+.marke.gruen { background: #dcefdc; color: #1f5c22; }
+.marke.gelb { background: #fbeec2; color: #7a5600; }
+.marke.rot { background: #f8d9d5; color: #8e2318; }
+.punkt { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 1px solid #0004; vertical-align: -2px; }
+ul.hinweise { list-style: none; padding: 0; margin: 0; }
+ul.hinweise li { padding: 8px 12px; border-left: 4px solid var(--gelb); background: var(--karte); margin-bottom: 6px; border-radius: 0 8px 8px 0; }
+ul.hinweise li.rot { border-color: var(--rot); }
+ul.hinweise li.gruen { border-color: var(--gruen); }
+#karte { height: 420px; border-radius: 12px; border: 1px solid var(--rand); margin-bottom: 12px; }
+dialog { border: 0; border-radius: 14px; padding: 18px; width: min(560px, 94vw); max-height: 92vh; }
+dialog::backdrop { background: #0007; }
+dialog h2 { font-size: 18px; }
+dialog .felder { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+dialog label { font-size: 13px; color: var(--leise); display: block; }
+dialog label.breit { grid-column: 1 / -1; }
+dialog label.check { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 15px; }
+dialog .btns { display: flex; gap: 8px; margin-top: 16px; }
+dialog .btns .platz { flex: 1; }
+.tage { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.tage .karte { text-align: center; padding: 10px; }
+.tage .gross { font-size: 26px; }
+.balken { height: 10px; background: #eee6d2; border-radius: 99px; overflow: hidden; }
+.balken i { display: block; height: 100%; background: var(--honig); }
+svg.diagramm { width: 100%; height: 200px; background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; }
+.formraster { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.formraster label { font-size: 13px; color: var(--leise); }
+.vz-rahmen { overflow: auto; max-height: 78vh; border: 1px solid var(--rand); border-radius: 8px; }
+.vz-rahmen canvas { display: block; cursor: crosshair; }
+a.btn { text-decoration: none; }
+@media (max-width: 520px) { dialog .felder { grid-template-columns: 1fr; } #karte { height: 320px; } }
