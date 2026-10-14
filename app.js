@@ -1,6 +1,6 @@
 // ---------- Daten ----------
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [] });
 let db = laden();
 function laden() { try { return Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return leer(); } }
 function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpiegeln(); }
@@ -97,7 +97,7 @@ const DEF = {
     { k: 'wartezeit', label: 'Wartezeit (Tage)', typ: 'number', step: 1 },
     { k: 'anwender', label: 'Anwender' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
-  ernten: { titel: 'Ernte', neu: () => ({ datum: heute(), produkt: 'Honig' }), felder: () => [
+  ernten: { titel: 'Ernte', neu: () => ({ datum: heute(), produkt: 'Honig', insLager: true }), nachher: ernteLagern, geloescht: id => bewegungenZurueck('ernteId', id), felder: () => [
     { k: 'datum', label: 'Datum', typ: 'date', req: 1 },
     { k: 'produkt', label: 'Produkt', typ: 'select', opts: ['Honig', 'Wachs', 'Propolis', 'Pollen', 'Gelée Royale'] },
     { k: 'volkId', label: 'Volk', typ: 'select', opts: [['', '– mehrere / ganzer Stand –'], ...optV()] },
@@ -106,6 +106,7 @@ const DEF = {
     { k: 'sorte', label: 'Sorte', liste: ['Blütenhonig', 'Waldhonig', 'Rapshonig', 'Lindenhonig', 'Akazienhonig', 'Kastanienhonig', 'Löwenzahnhonig', 'Cremehonig'] },
     { k: 'wasser', label: 'Wassergehalt (%)', typ: 'number', step: 0.1 },
     { k: 'los', label: 'Los-/Chargennr.' },
+    { k: 'insLager', label: 'Menge ins Lager buchen', typ: 'checkbox' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   lager: { titel: 'Lagerartikel', neu: () => ({ kategorie: 'Sonstiges', menge: 0, einheit: 'Stk' }), felder: () => [
     { k: 'name', label: 'Artikel', req: 1, breit: 1 },
@@ -115,6 +116,7 @@ const DEF = {
     { k: 'einheit', label: 'Einheit', liste: ['Stk', 'kg', 'g', 'l', 'ml', 'Karton', 'Rolle'] },
     { k: 'mindest', label: 'Mindestbestand', typ: 'number', step: 'any' },
     { k: 'preis', label: 'Stückpreis (€)', typ: 'number', step: 0.01 },
+    { k: 'vpreis', label: 'Verkaufspreis (€)', typ: 'number', step: 0.01, min: 0 },
     { k: 'mhd', label: 'Haltbar bis', typ: 'date' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   buchungen: { titel: 'Buchung', neu: () => ({ datum: heute(), art: 'Ausgabe' }), felder: () => [
@@ -178,19 +180,19 @@ function bearbeiten(typ, id, vorgabe = {}) {
   const def = DEF[typ];
   const alt = id && db[typ].find(x => x.id === id);
   formular(alt ? `${def.titel} bearbeiten` : `${def.titel} eintragen`, def.felder(), alt || { ...def.neu?.(), ...vorgabe },
-    w => { if (alt) Object.assign(alt, w); else db[typ].push({ id: uid(), ...w }); speichern(); render(); },
-    alt && (() => { db[typ] = db[typ].filter(x => x.id !== id); speichern(); if (typ === 'voelker') detailVolk = null; render(); }));
+    w => { const e = alt ? Object.assign(alt, w) : { id: uid(), ...w }; if (!alt) db[typ].push(e); def.nachher?.(e); speichern(); render(); },
+    alt && (() => { db[typ] = db[typ].filter(x => x.id !== id); def.geloescht?.(id); speichern(); if (typ === 'voelker') detailVolk = null; render(); }));
   if (typ === 'durchsichten') sprachLeiste();
 }
 
 // ---------- Navigation ----------
-const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['daten', 'Daten']];
+const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['verkauf', 'Verkauf'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['daten', 'Daten']];
 let ansicht = 'start', detailVolk = null, vegId = null, karte = null;
 function gehe(a) { ansicht = a; detailVolk = null; render(); scrollTo(0, 0); }
 function render() {
   $('#nav').innerHTML = ANSICHTEN.map(([k, l]) => `<button class="${k === ansicht ? 'aktiv' : ''}" onclick="gehe('${k}')">${l}</button>`).join('');
   if (karte) { karte.remove(); karte = null; }
-  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, finanzen: zeigeFinanzen, vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, daten: zeigeDaten })[ansicht]();
+  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen, vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, daten: zeigeDaten })[ansicht]();
 }
 const main = () => $('#main');
 const kopf = (titel, knoepfe = '') => `<div class="kopf"><h2>${titel}</h2><div class="zeile">${knoepfe}</div></div>`;
@@ -533,6 +535,7 @@ function zeigeErnten() {
   for (const e of db.ernten.filter(e => e.produkt === 'Honig')) proJahr[e.datum.slice(0, 4)] = (proJahr[e.datum.slice(0, 4)] || 0) + (e.kg || 0);
   const max = Math.max(1, ...Object.values(proJahr));
   main().innerHTML = kopf('Ernte', `<button class="haupt" onclick="bearbeiten('ernten')">+ Ernte</button>`) +
+    '<p class="leise klein-t">Neue Ernten werden ins Lager gebucht, Honig je Sorte als loser Honig in kg (z. B. „Waldhonig lose“). Von dort wird beim Abfüllen abgezogen.</p>' +
     (Object.keys(proJahr).length ? `<div class="karte" style="margin-bottom:12px">${Object.entries(proJahr).sort().reverse().map(([j, kg]) => `<div class="klein-t">${j}: <b>${zahl(kg)} kg</b> Honig</div><div class="balken"><i style="width:${kg / max * 100}%"></i></div>`).join('')}</div>` : '') +
     tabelle(['Datum', 'Produkt', 'Sorte', 'kg', 'Wasser', 'Volk', 'Standplatz', 'Los', ''], [...db.ernten].sort(nachDatum).map(e => [
       fmtD(e.datum), esc(e.produkt), esc(e.sorte), zahl(e.kg, 2), e.wasser != null ? marke(zahl(e.wasser) + ' %', e.wasser > 18 ? 'rot' : 'gruen') : '–', vName(e.volkId), sName(e.standortId), esc(e.los),
@@ -542,8 +545,8 @@ function zeigeErnten() {
 // ---------- Lager ----------
 function zeigeLager() {
   const wert = db.lager.reduce((s, l) => s + (l.menge || 0) * (l.preis || 0), 0);
-  main().innerHTML = kopf('Lager', `<button class="haupt" onclick="bearbeiten('lager')">+ Artikel</button>`) +
-    (db.lager.length ? `<p class="leise klein-t">${db.lager.length} Artikel · Lagerwert ${zahl(wert, 2)} €</p>` : '') +
+  main().innerHTML = kopf('Lager', `<label class="btn">📄 Rechnung erfassen<input type="file" accept="application/pdf,image/*" hidden onchange="reLaden(this.files[0]);this.value=''"></label><button class="haupt" onclick="bearbeiten('lager')">+ Artikel</button>`) +
+    `<div id="re-bereich">${reHtml()}</div>` + (db.lager.length ? `<p class="leise klein-t">${db.lager.length} Artikel · Lagerwert ${zahl(wert, 2)} €</p>` : '') +
     KATEGORIEN.map(k => {
       const ls = db.lager.filter(l => l.kategorie === k); if (!ls.length) return '';
       return `<h3>${k}</h3>` + tabelle(['Artikel', 'Bestand', 'Mindest', 'Lagerort', 'Haltbar bis', ''], ls.map(l => [
@@ -551,7 +554,7 @@ function zeigeLager() {
         marke(`${zahl(l.menge, 2)} ${l.einheit || ''}`, l.mindest != null && l.menge <= l.mindest ? 'rot' : 'gruen'), l.mindest != null ? zahl(l.mindest, 2) : '–', esc(l.ort), fmtD(l.mhd),
         `<div class="zeile"><button class="klein" onclick="buchen('${l.id}',1)">+ Zugang</button><button class="klein" onclick="buchen('${l.id}',-1)">− Abgang</button><button class="klein" onclick="bearbeiten('lager','${l.id}')">✎</button></div>`]));
     }).join('') + (db.lager.length ? '' : '<p class="leer">Noch keine Artikel im Lager.</p>') +
-    (db.bewegungen.length ? '<h3>Letzte Lagerbewegungen</h3>' + tabelle(['Datum', 'Artikel', 'Menge', 'Grund'], [...db.bewegungen].sort(nachDatum).slice(0, 15).map(b => [fmtD(b.datum), esc(db.lager.find(l => l.id === b.lagerId)?.name ?? '(gelöscht)'), (b.menge > 0 ? '+' : '') + zahl(b.menge, 2), esc(b.grund)])) : '');
+    (db.bewegungen.length ? '<h3>Letzte Lagerbewegungen</h3>' + tabelle(['Datum', 'Artikel', 'Menge', 'Grund'], [...db.bewegungen].sort(nachDatum).slice(0, 15).map(b => [fmtD(b.datum), esc(db.lager.find(l => l.id === b.lagerId)?.name ?? '(gelöscht)'), (b.menge > 0 ? '+' : '') + zahl(b.menge, 2), esc(b.grund)])) : '') + reListe();
 }
 function buchen(id, vz) {
   const l = db.lager.find(x => x.id === id);
@@ -681,7 +684,7 @@ function csvBehandlungen() {
   herunterladen(`bestandsbuch-${heute()}.csv`, '﻿' + z.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'), 'text/csv');
 }
 function zeigeDaten() {
-  main().innerHTML = kopf('Daten') + `<div class="karte"><p>Alle Einträge werden nur in diesem Browser auf diesem Gerät gespeichert. Sichere sie regelmäßig als Datei. Die Fotos der Varroa-Zählungen sind in der Sicherung nicht enthalten – lade sie bei Bedarf einzeln herunter.</p>
+  main().innerHTML = kopf('Daten') + `<div class="karte"><p>Alle Einträge werden nur in diesem Browser auf diesem Gerät gespeichert. Sichere sie regelmäßig als Datei. Die Fotos der Varroa-Zählungen und die Dateien erfasster Rechnungen sind in der Sicherung nicht enthalten – lade sie bei Bedarf einzeln herunter.</p>
     <div class="zeile"><button class="haupt" onclick="herunterladen('imkerei-sicherung-${heute()}.json', JSON.stringify(db, null, 1), 'application/json')">Sicherung herunterladen</button>
     <label class="btn">Sicherung einspielen <input type="file" accept=".json" hidden onchange="einspielen(this.files[0])"></label></div></div>
     <p class="leise klein-t">${Object.entries(db).filter(([, v]) => Array.isArray(v)).map(([k, v]) => `${k}: ${v.length}`).join(' · ')}</p>`;

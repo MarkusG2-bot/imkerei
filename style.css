@@ -78,3 +78,15 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 8px; fon
   #druck .unterschrift { margin-top: 24pt; }
 }
 @media (max-width: 520px) { dialog .felder { grid-template-columns: 1fr; } #karte { height: 320px; } }
+.vk-zeile { display: grid; grid-template-columns: 2fr 1fr 1fr 32px; gap: 8px; align-items: end; margin-top: 10px; }
+@media (max-width: 520px) { .vk-zeile { grid-template-columns: 1fr 1fr 32px; } .vk-zeile .vk-ware { grid-column: 1 / -1; } }
+/* Rechnungspositionen am Handy: Zeile oben, Menge und Betrag darunter nebeneinander */
+@media (max-width: 520px) {
+  #re-bereich thead { display: none; }
+  #re-bereich tr { display: grid; grid-template-columns: 28px 1fr 1fr; gap: 6px 8px; padding: 10px; border-bottom: 1px solid var(--rand); }
+  #re-bereich tr:last-child { border-bottom: 0; }
+  #re-bereich td { padding: 0; border: 0; }
+  #re-bereich td:nth-child(2) { grid-column: 2 / 4; }
+  #re-bereich td:nth-child(3) { grid-column: 2; }
+  #re-bereich td:nth-child(4) { grid-column: 3; }
+}

@@ -1,7 +1,7 @@
 // Service Worker: App funktioniert auch ohne Empfang am Bienenstand und meldet fällige Arbeiten.
 importScripts('fachlogik.js');
-const CACHE = 'imkerei-v3';
-const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
+const CACHE = 'imkerei-v6';
+const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'rechnung.js', 'verkauf.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(DATEIEN)).then(() => self.skipWaiting())));
@@ -9,8 +9,9 @@ self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Prom
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  const eigen = url.origin === location.origin, leaflet = url.hostname === 'unpkg.com';
-  if (e.request.method !== 'GET' || (!eigen && !leaflet)) return; // Wetter- und Kartendaten immer live
+  // Bibliotheken (Karte, PDF-Leser, Texterkennung samt Sprachdaten) nach dem ersten Laden auch offline
+  const eigen = url.origin === location.origin, bibliothek = ['unpkg.com', 'cdn.jsdelivr.net', 'tessdata.projectnaptha.com'].includes(url.hostname);
+  if (e.request.method !== 'GET' || (!eigen && !bibliothek)) return; // Wetter- und Kartendaten immer live
   // Netz zuerst (damit Updates ankommen), ohne Empfang aus dem Cache
   e.respondWith(fetch(e.request).then(r => {
     if (r.ok) { const kopie = r.clone(); caches.open(CACHE).then(c => c.put(e.request, kopie)); }
