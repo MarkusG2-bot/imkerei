@@ -102,7 +102,7 @@ function reMengen(zeile) {
 }
 const ohneSpannen = (z, spannen) => [...spannen].sort((a, b) => b[0] - a[0]).reduce((t, [a, b]) => t.slice(0, a) + ' '.repeat(b - a) + t.slice(b), z);
 const reName = rest => rest.replace(GELD, ' ').replace(/€|\beur\b/gi, ' ').replace(/(^|\s)[\d.,%\/-]+(?=\s|$)/g, ' ').replace(/[|*_]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-const reKategorie = text => RE_KAT.find(([re]) => re.test(text.toLowerCase()))?.[1] || 'Sonstiges';
+const reKategorie = text => { const k = RE_KAT.find(([re]) => re.test(text.toLowerCase()))?.[1]; return k && liste('lagerKat').includes(k) ? k : 'Sonstiges'; };
 function artikelFinden(text) {
   const zw = woerter(text); let beste = null, punkte = 0;
   for (const l of db.lager) {
@@ -194,7 +194,7 @@ function reHtml() {
       (p.zeile ? `<div class="leise klein-t">${esc(p.zeile)}</div>` : '') +
       `<select onchange="reArtikel(${i},this.value)"><option value="neu" ${neu ? 'selected' : ''}>＋ Neuer Artikel</option>${artikel.map(a => `<option value="${a.id}" ${a.id === p.artikel ? 'selected' : ''}>${esc(a.name)} (${esc(a.einheit)})</option>`).join('')}</select>` +
       (neu ? `<div class="zeile" style="margin-top:4px"><input placeholder="Name des neuen Artikels" value="${esc(p.neuName)}" oninput="rech.pos[${i}].neuName=this.value" style="flex:2;min-width:140px">
-        <select onchange="rech.pos[${i}].kategorie=this.value" style="flex:1;min-width:120px">${KATEGORIEN.map(k => `<option ${k === p.kategorie ? 'selected' : ''}>${k}</option>`).join('')}</select></div>` : ''),
+        <select onchange="rech.pos[${i}].kategorie=this.value" style="flex:1;min-width:120px">${liste('lagerKat').map(k => `<option ${k === p.kategorie ? 'selected' : ''}>${k}</option>`).join('')}</select></div>` : ''),
       `<div class="zeile" style="flex-wrap:nowrap"><input type="number" step="any" min="0" placeholder="Menge" value="${p.menge ?? ''}" oninput="rech.pos[${i}].menge=reZahl(this.value);rech.pos[${i}].manuell=true" style="width:90px">
         ${neu ? `<input value="${esc(p.einheit)}" list="dl-einheit" oninput="rech.pos[${i}].einheit=this.value" style="width:70px">` : esc(p.einheit)}</div>` +
       (!neu && umrechnen(1, p.einheit, l.einheit) == null ? marke(`Einheit prüfen: Artikel in ${l.einheit}`, 'gelb') : ''),

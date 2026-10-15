@@ -1,8 +1,14 @@
 // ---------- Daten ----------
+const VERSION = '1.0.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [] });
 let db = laden();
-function laden() { try { return Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return leer(); } }
+function laden() { try { return uebernehmen(Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {})); } catch { return leer(); } }
+// Ältere Datenstände anpassen: Trachtkarte lag früher im Textfeld „Trachtangebot“ (tracht)
+function uebernehmen(d) {
+  for (const s of d.standorte) if (s.tracht && typeof s.tracht === 'object') { s.trachtkarte = s.tracht; s.tracht = ''; }
+  return d;
+}
 function speichern() { localStorage.setItem(KEY, JSON.stringify(db)); statusSpiegeln(); }
 // Auszug für den Service Worker, damit er im Hintergrund fällige Arbeiten melden kann
 function statusSpiegeln() {
@@ -53,6 +59,9 @@ const optS = () => db.standorte.map(s => [s.id, s.name]);
 const optV = () => db.voelker.filter(v => v.status !== 'aufgelöst').map(v => [v.id, v.name]);
 const KATEGORIEN = ['Honig', 'Gläser & Deckel', 'Etiketten', 'Futter', 'Rähmchen & Mittelwände', 'Beutenteile', 'Behandlungsmittel', 'Werkzeug & Schutz', 'Wachs', 'Sonstiges'];
 const MITTEL = ['Ameisensäure 60 %', 'Ameisensäure 85 %', 'Oxalsäure träufeln', 'Oxalsäure verdampfen', 'Oxalsäure sprühen', 'Milchsäure 15 %', 'Thymol (Apiguard/Thymovar)', 'Drohnenbrutentnahme', 'Totale Brutentnahme', 'Bannwabenverfahren'];
+const SORTEN = ['Blütenhonig', 'Waldhonig', 'Rapshonig', 'Lindenhonig', 'Akazienhonig', 'Kastanienhonig', 'Löwenzahnhonig', 'Cremehonig'];
+const BUCH_KAT = ['Honigverkauf', 'Wachs / Propolis', 'Völkerverkauf', 'Förderung', 'Futter', 'Behandlungsmittel', 'Gläser & Etiketten', 'Material', 'Königinnen / Völker', 'Fahrtkosten', 'Versicherung / Beiträge', 'Sonstiges'];
+// Die Listen oben sind die Voreinstellung; was angezeigt wird, kommt aus liste(…) (unter „Anpassen“ änderbar)
 
 const DEF = {
   standorte: { titel: 'Standplatz', felder: () => [
@@ -90,7 +99,7 @@ const DEF = {
   behandlungen: { titel: 'Behandlung', neu: () => ({ datum: heute() }), felder: () => [
     { k: 'volkId', label: 'Volk', typ: 'select', opts: optV(), req: 1 },
     { k: 'datum', label: 'Beginn', typ: 'date', req: 1 },
-    { k: 'mittel', label: 'Mittel / Verfahren', req: 1, liste: MITTEL },
+    { k: 'mittel', label: 'Mittel / Verfahren', req: 1, liste: liste('mittel') },
     { k: 'menge', label: 'Menge / Dosierung' },
     { k: 'charge', label: 'Chargennummer' },
     { k: 'ende', label: 'Ende', typ: 'date' },
@@ -103,14 +112,14 @@ const DEF = {
     { k: 'volkId', label: 'Volk', typ: 'select', opts: [['', '– mehrere / ganzer Stand –'], ...optV()] },
     { k: 'standortId', label: 'Standplatz', typ: 'select', opts: [['', '–'], ...optS()] },
     { k: 'kg', label: 'Menge (kg)', typ: 'number', step: 0.01, req: 1 },
-    { k: 'sorte', label: 'Sorte', liste: ['Blütenhonig', 'Waldhonig', 'Rapshonig', 'Lindenhonig', 'Akazienhonig', 'Kastanienhonig', 'Löwenzahnhonig', 'Cremehonig'] },
+    { k: 'sorte', label: 'Sorte', liste: liste('sorten') },
     { k: 'wasser', label: 'Wassergehalt (%)', typ: 'number', step: 0.1 },
     { k: 'los', label: 'Los-/Chargennr.' },
     { k: 'insLager', label: 'Menge ins Lager buchen', typ: 'checkbox' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   lager: { titel: 'Lagerartikel', neu: () => ({ kategorie: 'Sonstiges', menge: 0, einheit: 'Stk' }), felder: () => [
     { k: 'name', label: 'Artikel', req: 1, breit: 1 },
-    { k: 'kategorie', label: 'Kategorie', typ: 'select', opts: KATEGORIEN },
+    { k: 'kategorie', label: 'Kategorie', typ: 'select', opts: liste('lagerKat') },
     { k: 'ort', label: 'Lagerort' },
     { k: 'menge', label: 'Bestand', typ: 'number', step: 'any', req: 1 },
     { k: 'einheit', label: 'Einheit', liste: ['Stk', 'kg', 'g', 'l', 'ml', 'Karton', 'Rolle'] },
@@ -123,7 +132,7 @@ const DEF = {
     { k: 'datum', label: 'Datum', typ: 'date', req: 1 },
     { k: 'art', label: 'Art', typ: 'select', opts: ['Ausgabe', 'Einnahme'] },
     { k: 'betrag', label: 'Betrag (€)', typ: 'number', step: 0.01, min: 0, req: 1 },
-    { k: 'kategorie', label: 'Kategorie', liste: ['Honigverkauf', 'Wachs / Propolis', 'Völkerverkauf', 'Förderung', 'Futter', 'Behandlungsmittel', 'Gläser & Etiketten', 'Material', 'Königinnen / Völker', 'Fahrtkosten', 'Versicherung / Beiträge', 'Sonstiges'] },
+    { k: 'kategorie', label: 'Kategorie', liste: liste('buchKat') },
     { k: 'text', label: 'Beschreibung', breit: 1 }] },
   investitionen: { titel: 'Investition', neu: () => ({ datum: heute(), jahre: 10 }), felder: () => [
     { k: 'name', label: 'Anschaffung (z. B. Schleuder)', req: 1, breit: 1 },
@@ -186,13 +195,16 @@ function bearbeiten(typ, id, vorgabe = {}) {
 }
 
 // ---------- Navigation ----------
-const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['verkauf', 'Verkauf'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['daten', 'Daten']];
+const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['verkauf', 'Verkauf'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['arbeit', 'Arbeitszeit'], ['daten', 'Daten'], ['einstellungen', '⚙ Anpassen']];
 let ansicht = 'start', detailVolk = null, vegId = null, karte = null;
 function gehe(a) { ansicht = a; detailVolk = null; render(); scrollTo(0, 0); }
 function render() {
-  $('#nav').innerHTML = ANSICHTEN.map(([k, l]) => `<button class="${k === ansicht ? 'aktiv' : ''}" onclick="gehe('${k}')">${l}</button>`).join('');
+  // Menü in der unter „Anpassen“ gewählten Reihenfolge; die offene Seite bleibt sichtbar, auch wenn sie ausgeblendet ist
+  $('#nav').innerHTML = geordnet('menue', true).filter(t => t.an || t.k === ansicht).map(t => `<button class="${t.k === ansicht ? 'aktiv' : ''}" onclick="gehe('${t.k}')">${t.label}</button>`).join('');
+  uhrLeiste();
   if (karte) { karte.remove(); karte = null; }
-  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen, vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, daten: zeigeDaten })[ansicht]();
+  ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen,
+    vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, daten: zeigeDaten, einstellungen: zeigeEinstellungen })[ansicht]();
 }
 const main = () => $('#main');
 const kopf = (titel, knoepfe = '') => `<div class="kopf"><h2>${titel}</h2><div class="zeile">${knoepfe}</div></div>`;
@@ -235,19 +247,32 @@ function alleHinweise() {
 }
 
 // ---------- Übersicht ----------
+// Bausteine der Übersicht; Reihenfolge und Sichtbarkeit unter „Anpassen“ (aus: 1 = anfangs ausgeblendet)
+const jahrJetzt = () => heute().slice(0, 4), aktiveVoelker = () => db.voelker.filter(v => v.status !== 'aufgelöst');
+const kachel = (ziel, wert, text) => `<div class="karte kachel klick" onclick="gehe('${ziel}')"><b>${wert}</b>${text}</div>`;
+const START_TEILE = [
+  { k: 'standorte', label: 'Kachel Standplätze', kachel: () => kachel('standorte', db.standorte.length, 'Standplätze') },
+  { k: 'voelker', label: 'Kachel Völker', kachel: () => kachel('voelker', aktiveVoelker().length, 'Völker') },
+  { k: 'honig', label: 'Kachel Honigernte', kachel: () => { const j = jahrJetzt(), n = aktiveVoelker().length, kg = db.ernten.filter(e => e.produkt === 'Honig' && e.datum?.startsWith(j)).reduce((s, e) => s + (e.kg || 0), 0);
+    return kachel('ernten', zahl(kg) + ' kg', `Honig ${j}${n ? ` · ⌀ ${zahl(kg / n)} kg/Volk` : ''}`); } },
+  { k: 'aufgaben', label: 'Kachel offene Aufgaben', kachel: () => kachel('aufgaben', db.aufgaben.filter(a => !a.erledigt).length, 'offene Aufgaben') },
+  { k: 'glaeser', label: 'Kachel volle Gläser', aus: 1, kachel: () => kachel('verkauf', zahl(db.lager.filter(istGlasware).reduce((s, l) => s + (l.menge || 0), 0), 0), 'volle Gläser auf Lager') },
+  { k: 'einnahmen', label: 'Kachel Einnahmen', aus: 1, kachel: () => kachel('finanzen', euro(db.buchungen.filter(b => b.art === 'Einnahme' && b.datum.startsWith(jahrJetzt())).reduce((s, b) => s + b.betrag, 0)), 'Einnahmen ' + jahrJetzt()) },
+  { k: 'arbeitszeit', label: 'Kachel Arbeitszeit', aus: 1, kachel: () => kachel('arbeit', dauerText(db.arbeitszeiten.filter(a => a.datum.startsWith(jahrJetzt())).reduce((s, a) => s + a.minuten, 0)), 'Arbeitszeit ' + jahrJetzt()) },
+  { k: 'lagerwert', label: 'Kachel Lagerwert', aus: 1, kachel: () => kachel('lager', euro(db.lager.reduce((s, l) => s + (l.menge || 0) * (l.preis || 0), 0)), 'Lagerwert') },
+  { k: 'uhr', label: 'Arbeitszeit Start/Stopp', html: () => uhrKarte() },
+  { k: 'hinweise', label: 'Hinweise', html: () => { const h = alleHinweise();
+    return `<h3>Hinweise</h3>${h.length ? `<ul class="hinweise">${h.map(([f, t]) => `<li class="${f}">${t}</li>`).join('')}</ul>` : '<ul class="hinweise"><li class="gruen">Alles in Ordnung – keine offenen Hinweise.</li></ul>'}`; } },
+  { k: 'wetter', label: 'Wetter am Stand', html: () => `<h3>Wetter am Stand</h3><div id="start-wetter" class="leise">${db.standorte.some(hatKoord) ? 'Lade …' : 'Trage einen Standplatz mit Koordinaten ein, um Wetter und Vegetationsstand zu sehen.'}</div>` },
+];
 function zeigeStart() {
-  const jahr = heute().slice(0, 4);
-  const honig = db.ernten.filter(e => e.produkt === 'Honig' && e.datum?.startsWith(jahr)).reduce((s, e) => s + (e.kg || 0), 0);
-  const aktiv = db.voelker.filter(v => v.status !== 'aufgelöst');
-  const h = alleHinweise();
-  main().innerHTML = kopf('Übersicht') + visKarte() + `<div class="raster">
-    <div class="karte kachel klick" onclick="gehe('standorte')"><b>${db.standorte.length}</b>Standplätze</div>
-    <div class="karte kachel klick" onclick="gehe('voelker')"><b>${aktiv.length}</b>Völker</div>
-    <div class="karte kachel klick" onclick="gehe('ernten')"><b>${zahl(honig)} kg</b>Honig ${jahr}${aktiv.length ? ` · ⌀ ${zahl(honig / aktiv.length)} kg/Volk` : ''}</div>
-    <div class="karte kachel klick" onclick="gehe('aufgaben')"><b>${db.aufgaben.filter(a => !a.erledigt).length}</b>offene Aufgaben</div></div>
-    <h3>Hinweise</h3>${h.length ? `<ul class="hinweise">${h.map(([f, t]) => `<li class="${f}">${t}</li>`).join('')}</ul>` : '<ul class="hinweise"><li class="gruen">Alles in Ordnung – keine offenen Hinweise.</li></ul>'}
-    <h3>Wetter am Stand</h3><div id="start-wetter" class="leise">${db.standorte.some(hatKoord) ? 'Lade …' : 'Trage einen Standplatz mit Koordinaten ein, um Wetter und Vegetationsstand zu sehen.'}</div>`;
-  const s = db.standorte.find(hatKoord);
+  // Aufeinanderfolgende Kacheln kommen in ein gemeinsames Raster
+  let html = '', reihe = [];
+  const raus = () => { if (reihe.length) html += `<div class="raster" style="margin-bottom:12px">${reihe.join('')}</div>`; reihe = []; };
+  for (const t of geordnet('start')) { if (t.kachel) reihe.push(t.kachel()); else { raus(); html += t.html(); } }
+  raus();
+  main().innerHTML = kopf('Übersicht', '<button class="klein" onclick="gehe(\'einstellungen\')">⚙ Anpassen</button>') + visKarte() + html;
+  const s = $('#start-wetter') && db.standorte.find(hatKoord);
   if (s) wetter(s).then(d => {
     const el = $('#start-wetter'); if (!el) return;
     const t = d.tage.find(x => x.datum === heute()) || d.tage[0], f = flug(t), p = phase(d.gts, heute());
@@ -262,13 +287,14 @@ const beutenAm = s => [...new Set(db.voelker.filter(v => v.standortId === s.id &
 function zeigeStandorte() {
   main().innerHTML = kopf('Standplätze', `<button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
     `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button>
-     <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = 3 km Flugradius.</span></div>
+     <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input type="number" min="0.5" max="10" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)" style="width:72px"> km</label>
+     <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = ${zahl(flugradius())} km Flugradius.</span></div>
     <div id="karte"></div><div id="tracht-info"></div>` +
     tabelle(['Name', 'Art', 'Völker', 'Koordinaten', 'Reg.-Nr.', 'Tracht', ''], db.standorte.map(s => [
       `<b>${esc(s.name)}</b>${s.notiz ? `<div class="leise klein-t">${esc(s.notiz)}</div>` : ''}`, esc(s.typ),
       db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length,
       hatKoord(s) ? `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : marke('fehlen', 'gelb'), esc(s.regnr), esc(s.tracht),
-      `<div class="zeile">${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`]));
+      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button><button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`]));
   $('#ortsuche').onkeydown = e => { if (e.key === 'Enter') ortSuchen(); };
   if (!window.L) { $('#karte').outerHTML = '<p class="leer">Karte nicht verfügbar (keine Internetverbindung). Koordinaten können von Hand eingetragen werden.</p>'; return; }
   karte = L.map('karte').setView([47.6, 14.1], 7);
@@ -276,7 +302,7 @@ function zeigeStandorte() {
   const punkte = [];
   for (const s of db.standorte.filter(hatKoord)) {
     const n = db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length;
-    const kreis = L.circle([s.lat, s.lon], { radius: 3000, color: '#e0a100', weight: 1, fillOpacity: 0.06, interactive: false }).addTo(karte);
+    const kreis = L.circle([s.lat, s.lon], { radius: flugradius() * 1000, color: '#e0a100', weight: 1, fillOpacity: 0.06, interactive: false }).addTo(karte);
     const m = L.marker([s.lat, s.lon], { draggable: true }).addTo(karte).bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.typ)} · ${n} Völker`);
     m.on('dragend', () => { const p = m.getLatLng(); s.lat = +p.lat.toFixed(5); s.lon = +p.lng.toFixed(5); kreis.setLatLng(p); speichern(); });
     punkte.push([s.lat, s.lon]);
@@ -547,8 +573,9 @@ function zeigeLager() {
   const wert = db.lager.reduce((s, l) => s + (l.menge || 0) * (l.preis || 0), 0);
   main().innerHTML = kopf('Lager', `<label class="btn">📄 Rechnung erfassen<input type="file" accept="application/pdf,image/*" hidden onchange="reLaden(this.files[0]);this.value=''"></label><button class="haupt" onclick="bearbeiten('lager')">+ Artikel</button>`) +
     `<div id="re-bereich">${reHtml()}</div>` + (db.lager.length ? `<p class="leise klein-t">${db.lager.length} Artikel · Lagerwert ${zahl(wert, 2)} €</p>` : '') +
-    KATEGORIEN.map(k => {
-      const ls = db.lager.filter(l => l.kategorie === k); if (!ls.length) return '';
+    // Eigene Kategorien in eigener Reihenfolge; Artikel mit einer Kategorie, die nicht in der Liste steht, kommen hinten dazu
+    [...new Set([...liste('lagerKat'), ...db.lager.map(l => l.kategorie || 'Sonstiges')])].map(k => {
+      const ls = db.lager.filter(l => (l.kategorie || 'Sonstiges') === k); if (!ls.length) return '';
       return `<h3>${k}</h3>` + tabelle(['Artikel', 'Bestand', 'Mindest', 'Lagerort', 'Haltbar bis', ''], ls.map(l => [
         `<b>${esc(l.name)}</b>${l.notiz ? `<div class="leise klein-t">${esc(l.notiz)}</div>` : ''}`,
         marke(`${zahl(l.menge, 2)} ${l.einheit || ''}`, l.mindest != null && l.menge <= l.mindest ? 'rot' : 'gruen'), l.mindest != null ? zahl(l.mindest, 2) : '–', esc(l.ort), fmtD(l.mhd),
@@ -695,11 +722,12 @@ async function einspielen(datei) {
     const neu = JSON.parse(await datei.text());
     if (!Array.isArray(neu.voelker) || !Array.isArray(neu.standorte)) throw new Error();
     if (!confirm('Die aktuellen Daten werden durch die Sicherung ersetzt. Fortfahren?')) return;
-    db = Object.assign(leer(), neu); speichern(); gehe('start');
+    db = uebernehmen(Object.assign(leer(), neu)); speichern(); gehe('start');
   } catch { alert('Diese Datei ist keine gültige Imkerei-Sicherung.'); }
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.(); // Browser bitten, die Daten nicht automatisch zu löschen
+$('header h1').insertAdjacentHTML('beforeend', ` <small class="version">v${VERSION}</small>`);
 render();
 statusSpiegeln(); meldeJetzt();

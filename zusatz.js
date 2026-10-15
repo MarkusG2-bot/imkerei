@@ -25,6 +25,11 @@ function zeigeFinanzen() {
       <div class="karte kachel"><b style="color:var(--${ergebnis >= 0 ? 'gruen' : 'rot'})">${euro(ergebnis)}</b>Ergebnis ${jahr}</div></div>
     <div class="karte" style="margin-top:12px">Kosten je Volk: <b>${voelker ? euro((aus + abschr) / voelker) : '–'}</b> · Ergebnis je Volk: <b>${voelker ? euro(ergebnis / voelker) : '–'}</b>
       · Kosten je kg Honig: <b>${honig ? euro((aus + abschr) / honig) : '–'}</b><div class="leise klein-t">Gerechnet mit ${voelker} aktuellen Völkern und ${zahl(honig)} kg Honigernte ${jahr}. Kosten = Ausgaben + Abschreibung.</div></div>
+    ${(() => { // Eigene Arbeitszeit als Wert, nicht als Geldfluss
+      const az = db.arbeitszeiten.filter(a => a.datum.startsWith(jahr)); if (!az.length) return '';
+      const min = az.reduce((s, a) => s + a.minuten, 0), wert = az.reduce((s, a) => s + zeitWert(a), 0);
+      return `<div class="karte klick" style="margin-top:12px" onclick="gehe('arbeit')">Arbeitszeit ${jahr}: <b>${dauerText(min)}</b>${lohn() != null || az.some(a => a.lohn != null) ? ` · Wert <b>${euro(wert)}</b> · Ergebnis inkl. Arbeitszeit: <b style="color:var(--${ergebnis - wert >= 0 ? 'gruen' : 'rot'})">${euro(ergebnis - wert)}</b>
+        · Kosten je kg Honig inkl. Arbeit: <b>${honig ? euro((aus + abschr + wert) / honig) : '–'}</b>` : ' · <span class="leise">Stundenlohn unter Arbeitszeit eintragen, dann wird sie hier bewertet.</span>'}</div>`; })()}
     <div class="raster" style="margin-top:12px"><div class="karte"><h4>Einnahmen nach Kategorie</h4>${balken(gruppen('Einnahme'), ein)}</div><div class="karte"><h4>Ausgaben nach Kategorie</h4>${balken(gruppen('Ausgabe'), aus)}</div></div>
     <h3>Buchungen ${jahr}</h3>` +
     tabelle(['Datum', 'Art', 'Kategorie', 'Beschreibung', 'Betrag', ''], [...bs].sort(nachDatum).map(b => [fmtD(b.datum), marke(b.art, b.art === 'Einnahme' ? 'gruen' : 'gelb'), esc(b.kategorie), esc(b.text),
@@ -137,7 +142,10 @@ function beobachten(sid, i) {
   }, alt && (() => { db.beobachtungen = db.beobachtungen.filter(b => !gleiche(b)); speichern(); render(); }));
 }
 
-// ---------- Trachtkarte: Flächennutzung im 3-km-Flugradius aus OpenStreetMap ----------
+// ---------- Trachtkarte: Flächennutzung im Flugradius aus OpenStreetMap ----------
+// Flugradius in km, unter Standplätze einstellbar (0,5–10 km)
+const flugradius = () => db.einstellungen.flugradius || 3;
+function radiusSetzen(v) { db.einstellungen.flugradius = Math.min(10, Math.max(0.5, reZahl(v) || 3)); speichern(); render(); }
 const TRACHTFLAECHEN = [
   ['Raps (kartiert)', '#f2d200', t => t.crop === 'rapeseed'],
   ['Obst', '#e2557a', t => t.landuse === 'orchard'],
@@ -171,7 +179,7 @@ async function trachtkarte(sid) {
   const s = standort(sid), info = $('#tracht-info');
   if (!karte || !hatKoord(s)) return;
   info.innerHTML = '<p class="leise">Lade Flächendaten aus OpenStreetMap … das kann bis zu einer halben Minute dauern.</p>';
-  const um = `(around:3000,${s.lat},${s.lon})`, lu = '"landuse"~"^(forest|orchard|meadow|farmland|vineyard|residential|allotments)$"', na = '"natural"~"^(wood|grassland|heath|scrub)$"';
+  const r = flugradius(), um = `(around:${r * 1000},${s.lat},${s.lon})`, lu = '"landuse"~"^(forest|orchard|meadow|farmland|vineyard|residential|allotments)$"', na = '"natural"~"^(wood|grassland|heath|scrub)$"';
   let els;
   try {
     const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(`[out:json][timeout:40];(way[${lu}]${um};way[${na}]${um};relation[${lu}]${um};relation[${na}]${um};);out geom;`) });
@@ -187,8 +195,8 @@ async function trachtkarte(sid) {
     const ringe = e.type === 'way' ? [pkt(e.geometry || [])] : ringeVerbinden((e.members || []).filter(m => m.type === 'way' && m.role !== 'inner' && m.geometry).map(m => pkt(m.geometry)));
     for (const ring of ringe) if (ring.length > 3) flaechen.push({ kat, ring, n: Math.max(...ring.map(p => p[0])), s: Math.min(...ring.map(p => p[0])), o: Math.max(...ring.map(p => p[1])), w: Math.min(...ring.map(p => p[1])) });
   }
-  // Flächenanteile: Raster mit 100 m Abstand im Flugkreis, je Punkt die erste zutreffende Kategorie
-  const dLat = 100 / 111320, dLon = dLat / Math.cos(s.lat * Math.PI / 180), treffer = TRACHTFLAECHEN.map(() => 0); let punkte = 0;
+  // Flächenanteile: Raster mit 30 Punkten je Radius (bei 3 km alle 100 m), je Punkt die erste zutreffende Kategorie
+  const dLat = r * 1000 / 30 / 111320, dLon = dLat / Math.cos(s.lat * Math.PI / 180), treffer = TRACHTFLAECHEN.map(() => 0); let punkte = 0;
   for (let y = -30; y <= 30; y++) for (let x = -30; x <= 30; x++) {
     if (x * x + y * y > 900) continue;
     const lat = s.lat + y * dLat, lon = s.lon + x * dLon; let beste = 99; punkte++;
@@ -197,14 +205,14 @@ async function trachtkarte(sid) {
   }
   trachtEbene?.remove();
   trachtEbene = L.layerGroup(flaechen.map(f => L.polygon(f.ring, { stroke: false, fillColor: TRACHTFLAECHEN[f.kat][1], fillOpacity: 0.5, interactive: false }))).addTo(karte);
-  karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(6400));
-  s.tracht = { datum: heute(), anteile: treffer.map(t => +(t / punkte * 100).toFixed(1)) }; speichern();
+  karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000 + 400));
+  s.trachtkarte = { datum: heute(), radius: r, anteile: treffer.map(t => +(t / punkte * 100).toFixed(1)) }; speichern();
   info.innerHTML = trachtInfo(s);
 }
 function trachtInfo(s) {
-  const rest = Math.max(0, 100 - s.tracht.anteile.reduce((a, b) => a + b, 0));
-  return `<div class="karte" style="margin-bottom:12px"><h4>Trachtkarte ${esc(s.name)} – Flächen im 3-km-Flugradius</h4>
-    ${TRACHTFLAECHEN.map(([name, farbe], i) => [name, farbe, s.tracht.anteile[i]]).filter(x => x[2] > 0).sort((a, b) => b[2] - a[2]).map(([name, farbe, p]) => `<div class="klein-t"><span class="punkt" style="background:${farbe}"></span> ${name}: <b>${zahl(p)} %</b> · ca. ${zahl(p / 100 * 2827, 0)} ha</div><div class="balken"><i style="width:${p}%;background:${farbe}"></i></div>`).join('')}
-    <div class="klein-t leise" style="margin-top:6px">Nicht zugeordnet: ${zahl(rest)} %. Stand ${fmtD(s.tracht.datum)}, Quelle OpenStreetMap.</div>
-    <p class="klein-t">Raps wechselt jedes Jahr das Feld und ist in den Kartendaten fast nie erfasst. Die Ackerfläche zeigt, wo Raps, Sonnenblume oder Phacelia stehen können – welches Feld es heuer ist, sieht man nur vor Ort.</p></div>`;
+  const t = s.trachtkarte, r = t.radius || 3, ha = Math.PI * r * r * 100, rest = Math.max(0, 100 - t.anteile.reduce((a, b) => a + b, 0));
+  return `<div class="karte" style="margin-bottom:12px"><h4>Trachtkarte ${esc(s.name)} – Flächen im Flugradius ${zahl(r)} km</h4>
+    ${TRACHTFLAECHEN.map(([name, farbe], i) => [name, farbe, t.anteile[i]]).filter(x => x[2] > 0).sort((a, b) => b[2] - a[2]).map(([name, farbe, p]) => `<div class="klein-t"><span class="punkt" style="background:${farbe}"></span> ${name}: <b>${zahl(p)} %</b> · ca. ${zahl(p / 100 * ha, 0)} ha</div><div class="balken"><i style="width:${p}%;background:${farbe}"></i></div>`).join('')}
+    <div class="klein-t leise" style="margin-top:6px">Nicht zugeordnet: ${zahl(rest)} %. Stand ${fmtD(t.datum)}, Quelle OpenStreetMap.</div>
+    <p class="klein-t">Raps wechselt jedes Jahr das Feld und ist in diesen Kartendaten fast nie erfasst. Was genau auf den Äckern steht, zeigt „🍯 Potenzial“ mit den Felddaten der AMA.</p></div>`;
 }
