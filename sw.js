@@ -1,7 +1,7 @@
 // Service Worker: App funktioniert auch ohne Empfang am Bienenstand und meldet fällige Arbeiten.
 importScripts('fachlogik.js');
-const CACHE = 'imkerei-1.0.0'; // Version der App, wird beim Update gesetzt (gleich wie VERSION in app.js)
-const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'rechnung.js', 'verkauf.js', 'arbeit.js', 'ertrag.js', 'anpassen.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
+const CACHE = 'imkerei-1.1.0'; // Version der App, wird beim Update gesetzt (gleich wie VERSION in app.js)
+const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'rechnung.js', 'verkauf.js', 'arbeit.js', 'ertrag.js', 'sperrzonen.js', 'anpassen.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(DATEIEN)).then(() => self.skipWaiting())));

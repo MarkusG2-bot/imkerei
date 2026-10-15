@@ -1,7 +1,7 @@
 // ---------- Daten ----------
-const VERSION = '1.0.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
+const VERSION = '1.1.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [] });
 let db = laden();
 function laden() { try { return uebernehmen(Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {})); } catch { return leer(); } }
 // Ältere Datenstände anpassen: Trachtkarte lag früher im Textfeld „Trachtangebot“ (tracht)
@@ -140,6 +140,16 @@ const DEF = {
     { k: 'betrag', label: 'Betrag (€)', typ: 'number', step: 0.01, min: 0, req: 1 },
     { k: 'jahre', label: 'Nutzungsdauer (Jahre)', typ: 'number', step: 1, min: 1, req: 1 },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
+  sperrzonen: { titel: 'Sperrzone', neu: () => ({ radius: 3, von: heute() }), felder: () => [
+    { k: 'name', label: 'Ort / Bezeichnung', req: 1, breit: 1 },
+    { k: 'lat', label: 'Breitengrad', typ: 'number', step: 'any', req: 1 },
+    { k: 'lon', label: 'Längengrad', typ: 'number', step: 'any', req: 1 },
+    { k: 'radius', label: 'Radius (km)', typ: 'number', step: 0.5, min: 0.5, req: 1 },
+    { k: 'von', label: 'Gilt ab', typ: 'date' },
+    { k: 'bis', label: 'Aufgehoben am', typ: 'date' },
+    { k: 'gz', label: 'Geschäftszahl / Behörde' },
+    { k: 'link', label: 'Link zur Verordnung', breit: 1 },
+    { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   aufgaben: { titel: 'Aufgabe', neu: () => ({ faellig: heute() }), felder: () => [
     { k: 'titel', label: 'Aufgabe', req: 1, breit: 1 },
     { k: 'faellig', label: 'Fällig am', typ: 'date' },
@@ -239,6 +249,7 @@ function alleHinweise() {
     const frei = iso(new Date(new Date(b.ende || b.datum).getTime() + b.wartezeit * 864e5));
     if (frei >= t) h.push(['gelb', `${vName(b.volkId)}: Wartezeit ${esc(b.mittel)} bis ${fmtD(frei)}`]);
   }
+  h.push(...sperrHinweise());
   for (const l of db.lager) {
     if (l.mindest != null && l.menge <= l.mindest) h.push(['gelb', `Lager: ${esc(l.name)} unter Mindestbestand (${zahl(l.menge, 2)} ${esc(l.einheit)})`]);
     if (l.mhd && l.mhd <= iso(new Date(Date.now() + 30 * 864e5))) h.push([l.mhd < t ? 'rot' : 'gelb', `Lager: ${esc(l.name)} haltbar bis ${fmtD(l.mhd)}`]);
@@ -286,15 +297,16 @@ const hatKoord = s => s.lat != null && s.lon != null;
 const beutenAm = s => [...new Set(db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').map(v => v.beute))];
 function zeigeStandorte() {
   main().innerHTML = kopf('Standplätze', `<button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
-    `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button>
+    `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button><button id="sperr-knopf" onclick="sperrEintragen()">⚠ Sperrzone</button>
      <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input type="number" min="0.5" max="10" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)" style="width:72px"> km</label>
      <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = ${zahl(flugradius())} km Flugradius.</span></div>
     <div id="karte"></div><div id="tracht-info"></div>` +
+    (aktiveZonen().length ? `<ul class="hinweise" style="margin-bottom:12px">${sperrHinweise().map(([f, t]) => `<li class="${f}">${t}</li>`).join('') || `<li>${aktiveZonen().length} aktive Sperrzone(n) eingetragen – keiner deiner Standplätze liegt darin.</li>`}</ul>` : '') +
     tabelle(['Name', 'Art', 'Völker', 'Koordinaten', 'Reg.-Nr.', 'Tracht', ''], db.standorte.map(s => [
       `<b>${esc(s.name)}</b>${s.notiz ? `<div class="leise klein-t">${esc(s.notiz)}</div>` : ''}`, esc(s.typ),
       db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length,
       hatKoord(s) ? `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : marke('fehlen', 'gelb'), esc(s.regnr), esc(s.tracht),
-      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button><button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`]));
+      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button><button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`])) + sperrListeHtml();
   $('#ortsuche').onkeydown = e => { if (e.key === 'Enter') ortSuchen(); };
   if (!window.L) { $('#karte').outerHTML = '<p class="leer">Karte nicht verfügbar (keine Internetverbindung). Koordinaten können von Hand eingetragen werden.</p>'; return; }
   karte = L.map('karte').setView([47.6, 14.1], 7);
@@ -308,7 +320,11 @@ function zeigeStandorte() {
     punkte.push([s.lat, s.lon]);
   }
   if (punkte.length) karte.fitBounds(punkte, { maxZoom: 13, padding: [40, 40] });
-  karte.on('click', e => bearbeiten('standorte', null, { lat: +e.latlng.lat.toFixed(5), lon: +e.latlng.lng.toFixed(5), typ: 'Heimstand' }));
+  sperrKreise();
+  karte.on('click', e => {
+    const lat = +e.latlng.lat.toFixed(5), lon = +e.latlng.lng.toFixed(5);
+    if (sperrModus) { sperrModus = false; bearbeiten('sperrzonen', null, { lat, lon }); } else bearbeiten('standorte', null, { lat, lon, typ: 'Heimstand' });
+  });
 }
 async function ortSuchen() {
   const q = $('#ortsuche').value.trim(); if (!q || !karte) return;
@@ -367,7 +383,7 @@ function zeigeVolk(v) {
 function wandern(id) {
   const v = volk(id);
   formular(`${v.name} umstellen`, [{ k: 'datum', label: 'Datum', typ: 'date', req: 1 }, { k: 'nach', label: 'Neuer Standplatz', typ: 'select', opts: optS(), req: 1 }, { k: 'grund', label: 'Grund / Tracht', breit: 1 }],
-    { datum: heute() }, w => { db.wanderungen.push({ id: uid(), volkId: id, von: v.standortId, ...w }); v.standortId = w.nach; speichern(); render(); });
+    { datum: heute() }, w => { const warn = wanderWarnung(v.standortId, w.nach); if (warn.length && !confirm(warn.join('\n\n') + '\n\nTrotzdem umstellen?')) return; db.wanderungen.push({ id: uid(), volkId: id, von: v.standortId, ...w }); v.standortId = w.nach; speichern(); render(); });
 }
 
 // ---------- Varroa-Zähler (Foto der Windel) ----------

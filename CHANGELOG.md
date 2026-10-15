@@ -2,6 +2,20 @@
 
 Neueste Version oben. Die Version steht in der App oben neben „Imkerei“.
 
+## Version 1.1.0 · 15.10.2026 · Sperrzonen und Völkerdichte
+Geänderte Dateien: app.js, ertrag.js, anpassen.js, index.html, sw.js, sperrzonen.js (neu). Unverändert: fachlogik.js, zusatz.js, rechnung.js, verkauf.js, arbeit.js, style.css, Manifest. Stand vor der Änderung: Ordner sicherung-1.0.0 (in Imkerei-sicherungen).
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Bestehende Bienenstände im Umkreis berücksichtigen (VIS-Daten sind nicht öffentlich) – ja zur Völkerdichte | Standplätze → 🍯 Potenzial: Das Potenzial wird jetzt auf alle Völker im Flugradius aufgeteilt. Geschätzt mit 5,4 Völkern je km² (Österreich-Schnitt), bei 3 km rund 153 Völker. Die echte Zahl, z. B. von der Ortsgruppe, lässt sich direkt in der Kachel eintragen; die Dichte unter ⚙ Anpassen. |
+| Aktuelle Sperrzonen anzeigen | Standplätze → ⚠ Sperrzone → auf der Karte den Ausbruchsort antippen, Radius (3 km vorbelegt), Datum, Geschäftszahl und Link eintragen. Aktive Zonen sind rote Kreise auf der Karte. Liegt ein eigener Standplatz darin, steht eine rote Warnung in der Übersicht und über der Karte; beim Umstellen eines Volkes in eine Zone oder aus einer Zone fragt die App nach. Liste mit „Aufgehoben“-Knopf und Links zu den Listen der Landesverbände (OÖ, Tirol, Kärnten) und zum VIS. |
+
+Hinweise: Eine öffentliche Datenquelle für Sperrzonen gibt es nicht – die Bezirkshauptmannschaften erlassen sie per Verordnung, die Landesverbände führen Listen ohne Koordinaten. Deshalb werden die Zonen selbst eingetragen. Einzelne Bienenstände anderer Imker sind nicht öffentlich (VIS, Datenschutz).
+
+Geändertes Verhalten: Die Kachel „je Volk“ im Trachtpotenzial zeigt jetzt den Anteil bei allen Völkern im Umkreis statt nur bei den eigenen. Fehlen Wetterdaten länger als 20 Sekunden, rechnet die App ohne Trockenheitsfaktor weiter.
+
+Geprüft: Syntax aller Dateien. Im Vorschau-Browser: Sperrzone über den Knopf und Klick auf die Karte eingetragen (Koordinaten, 3 km und Datum vorbelegt), roter Kreis, Warnung über der Karte und in der Übersicht, Rückfrage beim Umstellen verhindert die Wanderung, „Aufgehoben“ beendet die Warnung noch am selben Tag. Trachtpotenzial mit echten Daten: 153 geschätzte Völker → 8–41 kg je Volk, eigene Angabe 60 → 21–105 kg, Leeren kehrt zur Schätzung zurück, ohne die Felder neu zu laden. Nicht geprüft: am echten Handy.
+
 ## Version 1.0.0 · 15.10.2026 · Trachtpotenzial, Anpassen, Arbeitszeit, Flugradius, Versionsnummer
 Geänderte Dateien: app.js, zusatz.js, rechnung.js, index.html, sw.js, style.css, arbeit.js (neu), anpassen.js (neu), ertrag.js (neu), CHANGELOG.md (neu). Unverändert: fachlogik.js, verkauf.js, Manifest. Stand vor der Änderung: Ordner sicherung-imkerei-v6 (in Imkerei-sicherungen).
 

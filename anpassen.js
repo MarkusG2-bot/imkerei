@@ -85,6 +85,8 @@ function zeigeEinstellungen() {
     <div class="raster">${Object.keys(LISTEN).map(listeHtml).join('')}</div>
     <h3>Weitere Einstellungen</h3><div class="raster">
       <div class="karte"><label class="klein-t">Flugradius auf der Karte (km)<input type="number" min="0.5" max="10" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)"></label></div>
+      <div class="karte"><label class="klein-t">Völkerdichte für das Trachtpotenzial (Völker je km²)<input type="number" min="0" step="0.1" value="${voelkerdichte()}" onchange="db.einstellungen.voelkerdichte=reZahl(this.value)??5.4;speichern();render()"></label>
+        <div class="leise klein-t">Österreich-Schnitt: rund 456.000 Völker auf 83.879 km² ≈ 5,4. Wird verwendet, solange beim Standplatz keine eigene Zahl eingetragen ist.</div></div>
       <div class="karte"><label class="klein-t">Stundenlohn für die Arbeitszeit (€)<input type="number" min="0" step="0.5" value="${lohn() ?? ''}" onchange="lohnSetzen(this.value)"></label></div></div>
     <div class="raster" style="margin-top:12px">${nektarHtml()}</div>`;
 }

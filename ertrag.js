@@ -78,7 +78,7 @@ async function niederschlag(s) {
   const key = 'imkerei-nd-' + s.lat.toFixed(3) + ',' + s.lon.toFixed(3), c = JSON.parse(localStorage.getItem(key) || 'null');
   if (c && Date.now() - c.t < 864e5) return c.d;
   const ende = iso(new Date(Date.now() - 6 * 864e5));
-  const j = await (await fetch(`https://archive-api.open-meteo.com/v1/archive?latitude=${s.lat}&longitude=${s.lon}&start_date=2010-01-01&end_date=${ende}&daily=precipitation_sum&timezone=auto`)).json();
+  const j = await (await fetch(`https://archive-api.open-meteo.com/v1/archive?latitude=${s.lat}&longitude=${s.lon}&start_date=2010-01-01&end_date=${ende}&daily=precipitation_sum&timezone=auto`, { signal: AbortSignal.timeout(20000) })).json();
   const d = { time: j.daily.time, p: j.daily.precipitation_sum };
   try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), d })); } catch { /* Speicher voll: ohne Zwischenspeicher weiter */ }
   return d;
@@ -112,7 +112,21 @@ async function potenzial(sid, jahr) {
   try {
     [felder, wetter] = await Promise.all([felderHolen(s, jahr, r, meldung), niederschlag(s).then(d => trockenheit(d, +jahr)).catch(() => null)]);
   } catch (e) { return info.innerHTML = `<p class="leer">Felder konnten nicht geladen werden (${esc(e.message)}). Bei großem Flugradius dauert es länger – später nochmal versuchen.</p>`; }
-  if (!$('#tracht-info')) return;
+  potLetzt = { sid, jahr, r, felder, wetter, jahre };
+  potZeigen(true);
+}
+// Völkerdichte Österreich: rund 456.000 Völker (2021, BMLUK) auf 83.879 km² ≈ 5,4 Völker je km²; unter Anpassen änderbar
+const voelkerdichte = () => db.einstellungen.voelkerdichte ?? 5.4;
+function umkreisSetzen(v) {
+  const s = standort(potLetzt.sid), n = reZahl(v);
+  if (n > 0) s.voelkerUmkreis = Math.round(n); else delete s.voelkerUmkreis;
+  speichern(); potZeigen(false);
+}
+// Rechnet mit den zuletzt geladenen Feldern; neueKarte = Trachtflächen neu einzeichnen
+let potLetzt = null;
+function potZeigen(neueKarte) {
+  const { sid, jahr, r, felder, wetter, jahre } = potLetzt, s = standort(sid), info = $('#tracht-info');
+  if (!s || !info) return;
   // Gruppensummen
   const gruppen = {}, rest = {};
   for (const [name, ha] of Object.entries(felder.kulturen)) {
@@ -123,22 +137,26 @@ async function potenzial(sid, jahr) {
   const zeilen = Object.values(gruppen).map(x => { const [lo, hi] = nektarWert(x.g); return { ...x, lo, hi, min: x.ha * lo, max: x.ha * hi }; }).sort((a, b) => b.max - a.max);
   const f = wetter?.faktor ?? 1, min = zeilen.reduce((a, z) => a + z.min, 0) * f, max = zeilen.reduce((a, z) => a + z.max, 0) * f, mitte = (min + max) / 2;
   const voelker = db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length;
+  // Alle Völker im Flugradius (deine eingeschlossen): eigene Angabe oder Schätzung aus der Völkerdichte
+  const schaetzung = Math.round(voelkerdichte() * Math.PI * r * r), umkreis = Math.max(voelker, s.voelkerUmkreis ?? schaetzung, 1);
   (s.potenzial ??= {})[jahr] = { min: Math.round(min), max: Math.round(max), faktor: +f.toFixed(2), radius: r, datum: heute() }; speichern();
   // Abgleich mit den eigenen Ernten an diesem Standplatz
   const vergleich = Object.entries(s.potenzial).map(([j, p]) => ({ j, p, kg: ernteAm(s, j) })).filter(x => x.kg > 0).sort((a, b) => b.j.localeCompare(a.j));
   const anteile = vergleich.map(x => x.kg / ((x.p.min + x.p.max) / 2)), erfahrung = anteile.length ? anteile.reduce((a, b) => a + b, 0) / anteile.length : null;
   // Nektarflächen auf der Karte
-  potEbene?.remove(); potEbene = null;
-  if (karte && window.L) {
+  if (neueKarte && karte && window.L) {
+    potEbene?.remove();
     potEbene = L.layerGroup(felder.nektarFlaechen.map(n => L.geoJSON(n.g, { style: { stroke: false, fillColor: '#e0a100', fillOpacity: 0.55 } }).bindTooltip(`${esc(n.name)} · ${zahl(n.ha, 2)} ha`))).addTo(karte);
     karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000 + 400));
   }
   const restHa = Object.values(rest).reduce((a, b) => a + b, 0), restTop = Object.entries(rest).sort((a, b) => b[1] - a[1]).slice(0, 6);
   info.innerHTML = `<div class="karte" style="margin-bottom:12px"><div class="kopf" style="margin-bottom:6px"><h4 style="margin:0">Trachtpotenzial ${esc(s.name)} · ${zahl(r)} km</h4>
-      <select style="width:auto" onchange="potenzial('${s.id}',this.value)">${jahre.map(j => `<option ${j === jahr ? 'selected' : ''}>${j}</option>`).join('')}</select></div>
+      <select style="width:auto" onchange="potenzial('${sid}',this.value)">${jahre.map(j => `<option ${j === jahr ? 'selected' : ''}>${j}</option>`).join('')}</select></div>
     <div class="raster">
       <div class="karte kachel"><b>${zahl(min, 0)}–${zahl(max, 0)} kg</b>Honigpotenzial im Flugradius</div>
-      <div class="karte kachel"><b>${voelker ? zahl(min / voelker, 0) + '–' + zahl(max / voelker, 0) + ' kg' : '–'}</b>rechnerisch je Volk (${voelker} am Stand, fremde Völker im Umkreis nicht abgezogen)</div>
+      <div class="karte kachel"><b>${zahl(min / umkreis, 0)}–${zahl(max / umkreis, 0)} kg</b>je Volk, geteilt auf ${zahl(umkreis, 0)} Völker im Umkreis (davon ${voelker} deine)
+        <label class="klein-t" style="display:flex;gap:6px;align-items:center;margin-top:6px">Völker im Umkreis <input type="number" min="1" step="1" value="${s.voelkerUmkreis ?? ''}" placeholder="${schaetzung}" onchange="umkreisSetzen(this.value)" style="width:80px"></label>
+        <span class="leise klein-t">${s.voelkerUmkreis ? 'deine Angabe' : `Schätzung aus ${zahl(voelkerdichte())} Völkern je km² – trag die Zahl ein, wenn du sie z. B. von der Ortsgruppe kennst`}</span></div>
       ${erfahrung != null ? `<div class="karte kachel"><b>${zahl(mitte * erfahrung / Math.max(1, voelker), 0)} kg</b>je Volk nach deiner Erfahrung (${zahl(erfahrung * 100, 0)} % des Potenzials)</div>` : ''}</div>
     ${wetter ? `<ul class="hinweise" style="margin-top:10px"><li class="${wetter.anteil < 0.7 ? 'rot' : wetter.anteil < 0.9 ? '' : 'gruen'}">Niederschlag ${fmtD(wetter.von)} bis ${fmtD(wetter.bis)}: <b>${zahl(wetter.jetzt, 0)} mm</b> = <b>${zahl(wetter.anteil * 100, 0)} %</b> des Mittels der ${wetter.jahre} Jahre davor (${zahl(wetter.mittel, 0)} mm) → Nektarfaktor <b>${zahl(wetter.faktor, 2)}</b>${wetter.anteil < 0.7 ? ' – deutlich zu trocken' : wetter.anteil > 1.2 ? ' – nasser als üblich' : ''}.</li></ul>`
       : '<p class="leise klein-t">Niederschlagsdaten nicht erreichbar – ohne Trockenheitsfaktor gerechnet.</p>'}
