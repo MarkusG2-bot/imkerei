@@ -57,6 +57,26 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   Statistik (Cp/Cpk), Messmittelverwaltung mit Kalibrierdatum
 - Ablage: offen, Nutzer fragt nach Empfehlung für 80 gleichzeitige Nutzer
 
+## Antworten Runde 2 (2026-10-17)
+- IT: **nur Netzlaufwerk** (kein SQL Server, kein SharePoint) → Variante 1
+- Teile: **Dreh- und Frästeile**
+- Toleranzen: **± zum Nennmaß und ISO-Passungen (z. B. H7)** – Form/Lage noch klären
+- Menge: **ca. 30 neue Messprotokolle**, **bis zu 1000 Maße pro Protokoll**
+  (Zeitraum pro Tag/Woche noch klären)
+- Norm: **ISO 9001**
+
+### Folgerungen daraus
+- Datenmenge: bei 30 Protokollen/Tag × bis 1000 Werte = bis 30.000 Werte/Tag,
+  mehrere Millionen pro Jahr → passt **nicht** in ein Excel-Blatt (max. ~1 Mio. Zeilen).
+  Daher: Daten **pro Artikel und Jahr in Ordnern** ablegen, Auswertung lädt
+  nur den gewählten Artikel.
+- ISO-Passungen: Grenzmaße automatisch aus hinterlegter ISO-286-Tabelle berechnen.
+- 1000 Maße pro Protokoll: Eingabe muss schnell sein (Tastatur, Enter springt
+  zum nächsten Maß, Prüfplan wird vorgeladen), ggf. Messgeräte-Import.
+- ISO 9001 verlangt u. a.: Messmittelüberwachung mit Kalibrierung (Kap. 7.1.5),
+  Rückverfolgbarkeit (wer, wann, welches Messmittel, welcher Zeichnungsstand),
+  Schutz freigegebener Protokolle vor Änderung (PDF + schreibgeschützte Datei).
+
 ## Kernproblem: 80 gleichzeitige Nutzer
 Eine einzige Excel-Datei, in die 80 Leute gleichzeitig schreiben, geht nicht gut:
 - Gemeinsames Bearbeiten (Co-Authoring) und VBA-Makros vertragen sich schlecht;
@@ -94,3 +114,5 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Eigener Ordner `messprotokoll/` im Repo | Vom Nutzer gewünscht |
 | 2026-10-17 | Excel 365 mit VBA | Antwort Nutzer |
 | 2026-10-17 | Eingabe und Datenspeicher werden getrennt | 80 gleichzeitige Nutzer |
+| 2026-10-17 | Variante 1: Excel + Netzlaufwerk, eine Datei pro Protokoll | Kein Server/SharePoint vorhanden |
+| 2026-10-17 | Ablage nach Artikel/Jahr, Auswertung pro Artikel | Datenmenge mehrere Mio. Werte/Jahr |
