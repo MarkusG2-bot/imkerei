@@ -131,6 +131,16 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
 
 → Architektur ausgearbeitet in `ARCHITEKTUR.md` (wartet auf Freigabe durch Nutzer).
 
+## Änderungswünsche zur Architektur (2026-10-17)
+- **Nacharbeit darf auch der Prüfer setzen** (Sonderfreigabe/Ausschuss nur Freigeber).
+- **Einstieg über Produktnummer**: zuerst prüfen, ob schon ein Protokoll mit
+  eingetragenen Daten existiert → dann dieses öffnen. Sonst Artikelnummer abfragen
+  und darüber die passende Prüfplan-Vorlage laden.
+- Nutzer fragte, was Cpk ist → erklärt (Prozessfähigkeit: wie sicher liegt die
+  Fertigung innerhalb der Toleranz; ≥ 1,33 üblich gut).
+- Offen: Ist die Produktnummer pro Teil eindeutig (wie eine Seriennummer)?
+  Woher kommen Auftragsnummer und Kunde (eintippen oder Liste)?
+
 ## Datenmodell-Entwurf
 - **Prüfplan** (je Artikel + Zeichnungsstand): Merkmal-Nr. (Ballon-Nr.), Bezeichnung,
   Merkmalsart, Nennmaß, Passung/Toleranzen, OGW, UGW, Messmittel-Typ, Kritisch ja/nein
@@ -189,3 +199,5 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | PDF-Import auf später verschoben, kein Hilfsprogramm | Antwort Nutzer |
 | 2026-10-17 | Prüfplan je Zeichnungsstand eigene Datei, neuer Stand = Kopie des alten | Antwort Nutzer |
 | 2026-10-17 | Stammdaten-Pflege durch eine Personengruppe | Antwort Nutzer |
+| 2026-10-17 | Prüfer darf Nacharbeit setzen | Wunsch Nutzer |
+| 2026-10-17 | Einstieg über Produktnummer, sonst Artikelnummer → Vorlage | Wunsch Nutzer |

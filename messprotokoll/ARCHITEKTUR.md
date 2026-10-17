@@ -31,7 +31,7 @@ Messdaten\
 ## Rollen (Erkennung über Windows-Benutzername)
 | Rolle | Darf |
 |-------|------|
-| Prüfer | Protokolle anlegen, Messwerte eintragen, abschließen |
+| Prüfer | Protokolle anlegen, Messwerte eintragen, abschließen, **Nacharbeit setzen** |
 | Freigeber (Gruppe) | n.i.O.-Maße entscheiden: Sonderfreigabe / Nacharbeit / Ausschuss |
 | Stammdaten (Gruppe) | Prüfpläne, Messmittel, Personen pflegen |
 
@@ -40,12 +40,21 @@ Messdaten\
    Toleranz/Passung). Passungen (z. B. H7) rechnet das Programm aus der ISO-286-Tabelle.
 2. **Neuer Zeichnungsstand**: alten Stand kopieren → nur Änderungen eintragen →
    geänderte Merkmale werden markiert. Alter Stand bleibt unverändert erhalten.
-3. **Messen**: Protokoll anlegen (Artikelnr., Produktnr., Auftragsnr., Kunde) →
-   Prüfplan wird geladen → Istwerte eintragen, Enter springt weiter →
+3. **Messen – Einstieg über die Produktnummer**:
+   - Prüfer gibt **Produktnummer** ein.
+   - Programm sucht, ob es dazu schon ein Protokoll gibt (Entwurf, Freigabe, Archiv).
+     Gefunden → Protokoll mit den bereits eingetragenen Daten öffnet sich
+     (Archiv nur lesend bzw. als Nachmessung nach Nacharbeit).
+   - Nicht gefunden → Aufforderung **Artikelnummer** → aktueller Prüfplanstand
+     dieses Artikels wird als Vorlage geladen → Auftragsnr., Kunde ergänzen.
+   - Schnelle Suche über ein Index-Verzeichnis (System\Index\<Produktnummer>.txt
+     mit Verweis auf die Protokolldatei) – kein Durchsuchen aller Ordner nötig.
+   Dann → Istwerte eintragen, Enter springt weiter →
    sofort Ampel i.O./n.i.O. → Messmittel je Merkmal wählbar (nur gültig kalibrierte).
    Zwischenspeichern als Entwurf möglich.
 4. **Abschließen**: alles i.O. → Archiv + PDF.
-   n.i.O. vorhanden → Ordner Freigabe.
+   n.i.O. vorhanden → Prüfer kann selbst **Nacharbeit** setzen;
+   für Sonderfreigabe oder Ausschuss → Ordner Freigabe.
 5. **Freigabe**: Freigeber sieht Liste offener Fälle → je n.i.O.-Maß
    Sonderfreigabe / Nacharbeit / Ausschuss + Begründung → Archiv + PDF.
    Nacharbeit: Teil wird neu gemessen (neues Protokoll mit Verweis).
