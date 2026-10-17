@@ -50,7 +50,37 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
 21. Datensicherung: wo liegt die Datei, wer sichert?
 22. Import von Messgeräten (USB-Messschieber, CSV vom KMG) nötig?
 
-## Architektur-Entwurf (noch nicht entschieden)
+## Antworten (2026-10-17)
+- Excel: **Microsoft 365, Makros (VBA) erlaubt**
+- Nutzer: **ca. 80 Personen gleichzeitig**
+- Ergebnis: druckbares Protokoll (PDF), automatische i.O./n.i.O.-Bewertung,
+  Statistik (Cp/Cpk), Messmittelverwaltung mit Kalibrierdatum
+- Ablage: offen, Nutzer fragt nach Empfehlung für 80 gleichzeitige Nutzer
+
+## Kernproblem: 80 gleichzeitige Nutzer
+Eine einzige Excel-Datei, in die 80 Leute gleichzeitig schreiben, geht nicht gut:
+- Gemeinsames Bearbeiten (Co-Authoring) und VBA-Makros vertragen sich schlecht;
+  im Browser (Excel Online) laufen Makros gar nicht.
+- Bei so vielen Schreibern drohen Speicherkonflikte, gesperrte Dateien und Datenverlust.
+- Die Datei wird mit der Zeit groß und langsam.
+
+Daraus folgt: **Eingabe und Datenspeicher trennen.**
+
+## Architektur-Varianten (Empfehlung offen bis Antwort zu IT/Server)
+**Variante 1 – nur Excel + Netzordner (ohne IT-Hilfe machbar)**
+- `Messprotokoll.xlsm` (Eingabe-Programm, schreibgeschützt, jeder öffnet seine Kopie)
+- `Stammdaten.xlsx` (Artikel, Prüfpläne, Messmittel, Prüfer – pflegt nur ein Admin)
+- Beim Speichern schreibt das Makro **eine eigene Datei pro Protokoll** in einen
+  Datenordner → niemand schreibt in dieselbe Datei, keine Konflikte
+- `Auswertung.xlsx` sammelt alle Protokolle per Power Query (Statistik, Cpk, Suche)
+
+**Variante 2 – Excel vorne, Datenbank hinten (robusteste Lösung)**
+- Gleiches Excel-Eingabeprogramm, speichert aber per Makro in eine
+  Datenbank (SQL Server/Express oder SharePoint-Liste)
+- Echte Mehrbenutzerfähigkeit, Rechte, Rückverfolgbarkeit
+- Braucht IT-Unterstützung (Server bzw. SharePoint)
+
+## Ursprünglicher Architektur-Entwurf (Diskussionsgrundlage)
 Vorschlag als Diskussionsgrundlage:
 - **Stammdaten-Blätter:** Kunden, Artikel, Prüfplan (Merkmale je Artikel mit Nennmaß/Toleranz), Messmittel, Prüfer
 - **Erfassungs-Blatt:** Auftrag wählen → Merkmale aus Prüfplan werden geladen → Messwerte eintragen → i.O./n.i.O. automatisch
@@ -62,3 +92,5 @@ Vorschlag als Diskussionsgrundlage:
 | Datum | Entscheidung | Begründung |
 |-------|--------------|------------|
 | 2026-10-17 | Eigener Ordner `messprotokoll/` im Repo | Vom Nutzer gewünscht |
+| 2026-10-17 | Excel 365 mit VBA | Antwort Nutzer |
+| 2026-10-17 | Eingabe und Datenspeicher werden getrennt | 80 gleichzeitige Nutzer |
