@@ -10,6 +10,8 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
 ## Status
 - 2026-10-17: Ordner `messprotokoll/` angelegt. **Noch nichts gebaut.**
   Phase: Fragen klären und Architektur festlegen.
+- 2026-10-17: Alle Grundfragen beantwortet, `ARCHITEKTUR.md` als Entwurf erstellt.
+  **Nächster Schritt: Freigabe der Architektur durch den Nutzer, dann Phase 1 bauen.**
 
 ## Arbeitsregeln
 - Erst bauen, wenn die Architektur unten als „entschieden" markiert ist.
@@ -118,6 +120,17 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   → Ordnerablage nach Artikel/Jahr bestätigt; Schreibschutz für abgeschlossene
   Protokolle über Ordnerrechte (IT) plus PDF-Kopie.
 
+## Antworten Runde 5 (2026-10-17)
+- CAD: **SolidWorks**, aber es stehen **nur PDFs** zur Verfügung
+- **Kein Hilfsprogramm** jetzt → PDF-Import wird auf später verschoben
+  (Idee für später: nur mit Office-Bordmitteln, z. B. Word öffnet PDF oder Power Query)
+- Keine Beispiel-PDFs vorhanden
+- Stammdaten pflegt **eine Personengruppe**
+- Neuer Zeichnungsstand: **alter Prüfplan bleibt erhalten**, neuer Stand entsteht
+  als **Kopie des alten**, nur Änderungen werden eingetragen
+
+→ Architektur ausgearbeitet in `ARCHITEKTUR.md` (wartet auf Freigabe durch Nutzer).
+
 ## Datenmodell-Entwurf
 - **Prüfplan** (je Artikel + Zeichnungsstand): Merkmal-Nr. (Ballon-Nr.), Bezeichnung,
   Merkmalsart, Nennmaß, Passung/Toleranzen, OGW, UGW, Messmittel-Typ, Kritisch ja/nein
@@ -173,4 +186,6 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Cpk über mehrere Protokolle je Artikel/Merkmal | 1 Protokoll = 1 Teil |
 | 2026-10-17 | n.i.O.-Entscheidung: Sonderfreigabe/Nacharbeit/Ausschuss, nur Freigabe-Gruppe | Antwort Nutzer |
 | 2026-10-17 | Aufbewahrung 10 Jahre | Antwort Nutzer |
-| 2026-10-17 | PDF-Import als Vorschlagsliste, erst mit Beispiel-PDFs testen | Machbarkeit unsicher |
+| 2026-10-17 | PDF-Import auf später verschoben, kein Hilfsprogramm | Antwort Nutzer |
+| 2026-10-17 | Prüfplan je Zeichnungsstand eigene Datei, neuer Stand = Kopie des alten | Antwort Nutzer |
+| 2026-10-17 | Stammdaten-Pflege durch eine Personengruppe | Antwort Nutzer |
