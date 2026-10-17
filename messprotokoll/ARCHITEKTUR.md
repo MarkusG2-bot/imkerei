@@ -1,6 +1,6 @@
 # Architektur · Messdatenverwaltung Metalltechnik
 
-Status: **Entwurf zur Freigabe** (2026-10-17). Grundlage: GEDAECHTNIS.md
+Status: **freigegeben** (2026-10-17), Phase 1 gebaut (0.1.0). Grundlage: GEDAECHTNIS.md
 
 ## Rahmen
 - Microsoft 365 Excel mit VBA, Windows
@@ -16,8 +16,9 @@ Das Programm ist schreibgeschützt; jedes Protokoll und jeder Prüfplanstand ist
 ```
 Messdaten\
   Programm\       Messprotokoll.xlsm      (schreibgeschützt, alle öffnen diese Datei)
-  Stammdaten\     Stammdaten.xlsx         (Messmittel, Personen/Rollen, Kunden, ISO-286-Tabelle)
+  Stammdaten\     Stammdaten.xlsx         (Personen/Rollen, Messmittel)
   Pruefplaene\    <Artikel>\<Artikel>_Stand-<X>.xlsx   (ein Stand = eine Datei, alte bleiben)
+                  <Artikel>\aktueller_Stand.txt     (welcher Stand für neue Protokolle gilt)
   Daten\
     Entwurf\      laufende Protokolle (mit Sperrvermerk, wer gerade bearbeitet)
     Freigabe\     Protokolle mit n.i.O.-Maßen, warten auf Entscheidung
@@ -64,8 +65,8 @@ Messdaten\
    über alle Protokolle dieses Artikels.
 
 ## Merkmalsarten
-Maß (±), Passung (ISO 286), Form/Lage (nur Obergrenze), Oberfläche (Ra/Rz),
-Attribut (i.O./n.i.O., z. B. Gewindelehre).
+Maß (± oder Allgemeintoleranz ISO 2768 f/m/c/v), Passung (ISO 286), Form/Lage (nur Obergrenze),
+Oberfläche (Ra/Rz), Attribut (i.O./n.i.O., z. B. Gewindelehre).
 
 ## Datenformat Archiv
 Eine CSV-Datei pro Protokoll, eine Zeile pro Merkmal mit allen Kopfdaten

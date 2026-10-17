@@ -12,7 +12,36 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   Phase: Fragen klären und Architektur festlegen.
 - 2026-10-17: Alle Grundfragen beantwortet, `ARCHITEKTUR.md` als Entwurf erstellt.
   **Nächster Schritt: Freigabe der Architektur durch den Nutzer, dann Phase 1 bauen.**
-- 2026-10-17: Alle Fragen geklärt. Wartet nur noch auf „Go" für Phase 1.
+- 2026-10-17: Alle Fragen geklärt. Nutzer hat „Go" für Phase 1 gegeben.
+- 2026-10-17: **Phase 1 gebaut (Version 0.1.0)**, noch **nicht in echtem Excel getestet**.
+  Anleitung + Testliste: `EINRICHTEN.md`. Nächster Schritt: Nutzer testet unter Windows,
+  danach Phase 2 (Erfassung).
+
+## Stand Phase 1 (Version 0.1.0)
+- Dateien: `dateien/Messprotokoll.xlsx` (+ VBA-Import → .xlsm), `dateien/Stammdaten.xlsx`,
+  `dateien/vba/*.bas` (Windows-1252, CRLF für Excel-Import)
+- Quellcode UTF-8 in `quellcode/`; erzeugt mit `python3 werkzeuge/erzeuge.py`
+- ISO-286-Daten einzige Quelle: `werkzeuge/iso286_daten.py`
+- Tests mit LibreOffice (VBA-Modus): `tests/test_logik.py` (102 Prüfungen, gegen
+  Tabellenwerte ISO 286 / ISO 2768), `tests/syntax_pruefung.py` (jedes Modul einzeln).
+  Excel-Abläufe (Dateien, Knöpfe, Formeln) können hier nicht getestet werden.
+- Module: modISO286Daten (erzeugt), modISO286, modLogik (rein, getestet), modKonfig
+  (Pfade, Rollen, Dateihilfen), modPruefplan, modFormeln (PM_OGW/PM_UGW/PM_PRUEFUNG/PM_ABMASS),
+  modEinrichten (Knöpfe, Formeln, Ordner)
+- Zusätzlich eingebaut: **Allgemeintoleranz ISO 2768-1** (f/m/c/v) bei Art „Maß“
+  im Feld Passung (z. B. `2768-m`), Prüf-Spalte N mit Fehlertext je Zeile.
+- Basisordner = Elternordner von `Programm\` (oder Blatt System!B3).
+- Prüfplan-Datei: Blätter „Kopf“ (Schlüssel/Wert) und „Merkmale“ (13 Spalten, OGW/UGW als Zahl).
+- Speichern über Zwischendatei `~speichern_...` + Umbenennen; Konflikt-Erkennung über
+  Datei-Zeitstempel; alter Stand wird beim ersten Speichern des neuen Stands schreibgeschützt.
+- Rollen aus Stammdaten!Personen (x in Spalten Prüfer/Freigeber/Stammdaten), 5 min Cache;
+  Einrichtungsmodus, solange niemand Rolle Stammdaten hat.
+
+## Merkposten für spätere Phasen
+- Phase 2: Prüfplan-Stand sperren, sobald das erste Protokoll ihn verwendet.
+- Phase 2: Index `System\Index\<Produktnummer>.txt` für schnelle Suche.
+- Phase 4: Messmittel-Blatt ist in Stammdaten schon angelegt (Kalibrierstatus per Formel).
+- Später: PDF-Import (nur Office-Bordmittel), Messgeräte-/CSV-Import, ggf. Updater für Module.
 
 ## Arbeitsregeln
 - Erst bauen, wenn die Architektur unten als „entschieden" markiert ist.
@@ -206,3 +235,6 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Einstieg über Produktnummer, sonst Artikelnummer → Vorlage | Wunsch Nutzer |
 | 2026-10-17 | Produktnummer eindeutig = Schlüssel des Protokolls | Antwort Nutzer |
 | 2026-10-17 | Auftragsnummer und Kunde frei eintippen | Antwort Nutzer |
+| 2026-10-17 | VBA als Textdateien im Repo, einmaliger Import in Excel | .xlsm nicht unter Linux erzeugbar, Versionierung |
+| 2026-10-17 | ISO 2768-1 Allgemeintoleranzen zusätzlich unterstützt | Bei Dreh-/Frästeilen Standard |
+| 2026-10-17 | Logik-Tests über LibreOffice im VBA-Modus | Kein Excel in der Entwicklungsumgebung |
