@@ -12,6 +12,7 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   Phase: Fragen klären und Architektur festlegen.
 - 2026-10-17: Alle Grundfragen beantwortet, `ARCHITEKTUR.md` als Entwurf erstellt.
   **Nächster Schritt: Freigabe der Architektur durch den Nutzer, dann Phase 1 bauen.**
+- 2026-10-17: Alle Fragen geklärt. Wartet nur noch auf „Go" für Phase 1.
 
 ## Arbeitsregeln
 - Erst bauen, wenn die Architektur unten als „entschieden" markiert ist.
@@ -138,8 +139,10 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   und darüber die passende Prüfplan-Vorlage laden.
 - Nutzer fragte, was Cpk ist → erklärt (Prozessfähigkeit: wie sicher liegt die
   Fertigung innerhalb der Toleranz; ≥ 1,33 üblich gut).
-- Offen: Ist die Produktnummer pro Teil eindeutig (wie eine Seriennummer)?
-  Woher kommen Auftragsnummer und Kunde (eintippen oder Liste)?
+- **Produktnummer ist eindeutig** (Beispiel `J1567/1`, gibt es nur einmal).
+- **Auftragsnummer und Kunde werden eingetippt** (keine Auswahlliste).
+- Technischer Hinweis: `/` ist in Dateinamen nicht erlaubt → Produktnummer wird für
+  Dateinamen umgewandelt (`J1567/1` → `J1567_1`), im Protokoll bleibt das Original.
 
 ## Datenmodell-Entwurf
 - **Prüfplan** (je Artikel + Zeichnungsstand): Merkmal-Nr. (Ballon-Nr.), Bezeichnung,
@@ -201,3 +204,5 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Stammdaten-Pflege durch eine Personengruppe | Antwort Nutzer |
 | 2026-10-17 | Prüfer darf Nacharbeit setzen | Wunsch Nutzer |
 | 2026-10-17 | Einstieg über Produktnummer, sonst Artikelnummer → Vorlage | Wunsch Nutzer |
+| 2026-10-17 | Produktnummer eindeutig = Schlüssel des Protokolls | Antwort Nutzer |
+| 2026-10-17 | Auftragsnummer und Kunde frei eintippen | Antwort Nutzer |

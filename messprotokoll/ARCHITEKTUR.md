@@ -49,6 +49,8 @@ Messdaten\
      dieses Artikels wird als Vorlage geladen → Auftragsnr., Kunde ergänzen.
    - Schnelle Suche über ein Index-Verzeichnis (System\Index\<Produktnummer>.txt
      mit Verweis auf die Protokolldatei) – kein Durchsuchen aller Ordner nötig.
+   - Produktnummer ist eindeutig (z. B. `J1567/1`) und dient als Schlüssel.
+     Für Dateinamen wird `/` ersetzt (`J1567_1`); Auftragsnr. und Kunde werden eingetippt.
    Dann → Istwerte eintragen, Enter springt weiter →
    sofort Ampel i.O./n.i.O. → Messmittel je Merkmal wählbar (nur gültig kalibrierte).
    Zwischenspeichern als Entwurf möglich.
