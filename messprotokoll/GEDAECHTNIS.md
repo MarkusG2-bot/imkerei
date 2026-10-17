@@ -77,6 +77,37 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
   Rückverfolgbarkeit (wer, wann, welches Messmittel, welcher Zeichnungsstand),
   Schutz freigegebener Protokolle vor Änderung (PDF + schreibgeschützte Datei).
 
+## Antworten Runde 3 (2026-10-17)
+- **30 Protokolle pro Tag** → ca. 30.000 Messwerte/Tag, ca. 7 Mio./Jahr
+- **1 Protokoll = 1 Teil mit bis zu 1000 Merkmalen**
+- **Form- und Lagetoleranzen kommen vor** (einseitige Toleranz, z. B. Ebenheit ≤ 0,05)
+- **Keine Messgeräte-Anbindung derzeit**, Integration später gewünscht
+- **Keine generelle Freigabe**; nur Maße außerhalb der Toleranz müssen
+  freigegeben werden (Sonderfreigabe)
+- Offen: Wer legt Prüfpläne an / Quelle der Prüfpläne?
+
+### Folgerungen daraus
+- Cpk wird **über mehrere Protokolle** desselben Artikels je Merkmal berechnet
+  (jedes Protokoll = ein Teil = ein Wert pro Merkmal).
+- Merkmalsarten: Maß (±), Passung (ISO 286), Form/Lage (nur Obergrenze),
+  ggf. Oberfläche (Ra/Rz) und Attribut (i.O./n.i.O., z. B. Gewinde mit Lehre).
+- Protokoll-Status: In Arbeit → Abgeschlossen (alles i.O.)
+  bzw. → Wartet auf Freigabe → Freigegeben (Sonderfreigabe mit Name, Datum, Begründung).
+- Freigaberecht nur für berechtigte Personen (Liste in Stammdaten,
+  Erkennung über Windows-Benutzername).
+- Messgeräte-Integration vorbereiten: USB-Messschieber arbeiten meist wie eine
+  Tastatur (sofort nutzbar); Messmaschinen-Export (CSV) per Import-Makro später.
+
+## Datenmodell-Entwurf
+- **Prüfplan** (je Artikel + Zeichnungsstand): Merkmal-Nr. (Ballon-Nr.), Bezeichnung,
+  Merkmalsart, Nennmaß, Passung/Toleranzen, OGW, UGW, Messmittel-Typ, Kritisch ja/nein
+- **Protokoll-Kopf**: Protokoll-Nr., Artikel, Zeichnungsstand, Auftrag, Teil-Nr./Charge,
+  Prüfer, Datum, Status
+- **Messwert**: Protokoll-Nr., Merkmal-Nr., Istwert, Abweichung, i.O./n.i.O.,
+  Messmittel-Nr., Freigabe (wer, wann, Begründung)
+- **Messmittel**: Nr., Art, Messbereich, Standort, letzte/nächste Kalibrierung, Status
+- **Personen**: Windows-Benutzer, Name, Rolle (Prüfer / Freigeber / Admin)
+
 ## Kernproblem: 80 gleichzeitige Nutzer
 Eine einzige Excel-Datei, in die 80 Leute gleichzeitig schreiben, geht nicht gut:
 - Gemeinsames Bearbeiten (Co-Authoring) und VBA-Makros vertragen sich schlecht;
@@ -116,3 +147,5 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Eingabe und Datenspeicher werden getrennt | 80 gleichzeitige Nutzer |
 | 2026-10-17 | Variante 1: Excel + Netzlaufwerk, eine Datei pro Protokoll | Kein Server/SharePoint vorhanden |
 | 2026-10-17 | Ablage nach Artikel/Jahr, Auswertung pro Artikel | Datenmenge mehrere Mio. Werte/Jahr |
+| 2026-10-17 | Freigabe nur für n.i.O.-Maße (Sonderfreigabe) | Antwort Nutzer |
+| 2026-10-17 | Cpk über mehrere Protokolle je Artikel/Merkmal | 1 Protokoll = 1 Teil |
