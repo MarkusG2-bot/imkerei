@@ -1,0 +1,8 @@
+' Wird vom Installationsprogramm in "DieseArbeitsmappe" eingefügt
+Private Sub Workbook_Open()
+    BeimOeffnen
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    BeimSchliessen
+End Sub

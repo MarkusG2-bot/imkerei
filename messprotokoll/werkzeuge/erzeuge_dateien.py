@@ -7,7 +7,8 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Protection, Side
+from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.datavalidation import DataValidation
 
 import iso286_daten as D
@@ -15,6 +16,8 @@ import iso286_daten as D
 BASIS = Path(__file__).resolve().parent.parent
 ZIEL = BASIS / "dateien"
 
+MS_ERSTE = 10
+MS_MAX = 1000
 PP_ERSTE = 8
 PP_MAX = 1000
 LETZTE = PP_ERSTE + PP_MAX - 1
@@ -46,40 +49,205 @@ def blatt_start(wb):
     ws = wb.active
     ws.title = "Start"
     titel(ws, "Messprotokoll · Metalltechnik", "Messdatenverwaltung nach ISO 9001")
-    for z, text in enumerate(["Version", "Basisordner", "Angemeldet als", "Rollen"], start=4):
+    for z, text in enumerate(["Version", "Basisordner", "Angemeldet als", "Rollen", "Hinweise"], start=4):
         ws.cell(z, 2, text).font = fett
-    ws["B9"] = "Prüfpläne"
-    ws["B9"].font = Font(bold=True, size=12, color=BLAU)
-    ws["B19"] = "Verwaltung"
-    ws["B19"].font = Font(bold=True, size=12, color=BLAU)
+    for z, text in [(9, "Messen"), (15, "Prüfpläne"), (21, "Auswertung"), (27, "Verwaltung")]:
+        ws.cell(z, 2, text).font = Font(bold=True, size=12, color=BLAU)
     ws["E9"] = "So geht's"
     ws["E9"].font = Font(bold=True, size=12, color=BLAU)
     hilfe = [
-        "Prüfplan laden: Artikelnummer eingeben, Stand wählen.",
-        "Neuer Prüfplan: für Artikel, die noch keinen Prüfplan haben.",
-        "Neuer Zeichnungsstand: kopiert den geladenen Stand.",
-        "   Nur Änderungen eintragen – geänderte Merkmale werden",
-        "   beim Speichern gelb, neue grün markiert.",
-        "   Der alte Stand wird abgeschlossen (nur lesen).",
-        "Prüfplan speichern: prüft alle Zeilen und legt die Datei ab.",
+        "Messen: Produktnummer eingeben. Gibt es schon ein Protokoll, öffnet es sich.",
+        "   Sonst Artikelnummer eingeben – der aktuelle Prüfplan wird geladen.",
+        "   Istwerte in Spalte H, Enter springt zum nächsten Merkmal.",
+        "   Ampel in Spalte I: grün i.O., rot n.i.O.",
+        "Bei n.i.O. in Spalte K entscheiden:",
+        "   Nacharbeit (Prüfer) · Sonderfreigabe / Ausschuss (Freigabe-Gruppe + Begründung)",
+        "   Ohne Entscheidung geht das Protokoll an die Freigabe-Gruppe.",
+        "Abschließen: Protokoll wird archiviert, schreibgeschützt und als PDF abgelegt.",
+        "Zwischenspeichern: jederzeit möglich, später über die Produktnummer weiter.",
         "",
-        "Merkmalsarten im Prüfplan:",
-        "   Maß – Nennmaß + Abmaße oder Allgemeintoleranz (2768-m)",
-        "   Passung – Nennmaß + ISO-Passung (H7, g6 …)",
-        "   Form/Lage – Toleranz im Feld 'Abmaß oben'",
-        "   Oberfläche – Höchstwert (z. B. Ra 1,6) in 'Abmaß oben'",
-        "   Attribut – nur i.O./n.i.O. (z. B. Gewindelehre)",
+        "Prüfpläne: Merkmale mit Art, Nennmaß und Toleranz.",
+        "   Maß – Abmaße oder Allgemeintoleranz (2768-m) · Passung – z. B. H7, g6",
+        "   Form/Lage – Toleranz in 'Abmaß oben' · Oberfläche – Höchstwert · Attribut – i.O./n.i.O.",
+        "   Neuer Zeichnungsstand: Kopie des alten, Änderungen werden markiert.",
+        "",
+        "Auswertung: Cpk je Merkmal über alle abgeschlossenen Protokolle eines Artikels.",
+        "   ab 1,33 fähig · 1,0–1,33 bedingt · unter 1,0 nicht fähig",
+        "",
+        "Selbsttest: prüft Rechenwerte und Dateiablage auf diesem PC.",
     ]
     for i, t in enumerate(hilfe):
         ws.cell(10 + i, 5, t)
     ws.column_dimensions["A"].width = 3
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 60
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 70
     ws.column_dimensions["D"].width = 3
-    ws.column_dimensions["E"].width = 62
-    for z in range(10, 24):
+    ws.column_dimensions["E"].width = 90
+    for z in range(10, 34):
         ws.row_dimensions[z].height = 18
     ws.sheet_view.showGridLines = False
+
+
+def blatt_messung(wb):
+    ws = wb.create_sheet("Messung")
+    ws["A1"] = "Messprotokoll"
+    ws["A1"].font = Font(bold=True, size=16, color=BLAU)
+    links = ["Produktnummer", "Artikelnummer", "Bezeichnung", "Auftragsnummer", "Kunde", "Standard-Messmittel"]
+    rechts = ["Prüfplan-Stand", "Prüfer", "Begonnen", "Status", "Ergebnis", "Abgeschlossen"]
+    for i, (l, r) in enumerate(zip(links, rechts)):
+        z = 2 + i
+        for adr, text in ((f"B{z}", l), (f"F{z}", r)):
+            ws[adr] = text
+            ws[adr].font = fett
+            ws[adr].alignment = Alignment(horizontal="right")
+        for adr in (f"C{z}", f"G{z}"):
+            ws[adr].border = rahmen
+            ws[adr].fill = grau_fill
+    for adr in ("C5", "C6", "C7"):
+        ws[adr].fill = eingabe_fill
+    ws["C2"].font = Font(bold=True, size=12)
+    ws["G4"].number_format = ws["G7"].number_format = "DD.MM.YYYY HH:MM"
+    ws["A8"] = 'Kein Protokoll geöffnet – "Messung starten / öffnen" klicken'
+    ws["A8"].font = Font(bold=True, color="595959")
+
+    spalten = [
+        ("Nr", 6), ("Merkmal", 26), ("Art", 10), ("Nennmaß", 9), ("Passung / Toleranz", 11),
+        ("OGW", 10), ("UGW", 10), ("Istwert", 11), ("Bewertung", 10), ("Messmittel", 11),
+        ("Entscheidung", 14), ("Begründung", 26), ("Entschieden von", 14), ("Entschieden am", 15),
+        ("Vorwert", 9), ("Bemerkung", 22), ("Kritisch", 8), ("Messmittel-Typ", 16),
+    ]
+    for i, (text, breite) in enumerate(spalten, start=1):
+        c = ws.cell(9, i, text)
+        c.font = weiss_fett
+        c.fill = kopf_fill
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.column_dimensions[c.column_letter].width = breite
+    for sp, farbe in ((8, "FFFFFF"), (11, "FFFFFF")):
+        ws.cell(9, sp).fill = PatternFill("solid", fgColor="C65911")
+    ws.row_dimensions[9].height = 30
+    letzte = MS_ERSTE + MS_MAX - 1
+    for z in range(MS_ERSTE, letzte + 1):
+        for sp in (4, 6, 7):
+            ws.cell(z, sp).number_format = "0.000"
+        ws.cell(z, 14).number_format = "DD.MM.YYYY HH:MM"
+        for sp in (8, 10, 11, 12, 16):
+            ws.cell(z, sp).fill = eingabe_fill
+        ws.cell(z, 9).alignment = Alignment(horizontal="center")
+    dv = DataValidation(type="list", formula1='"Nacharbeit,Sonderfreigabe,Ausschuss"', allow_blank=True,
+                        showErrorMessage=True, errorTitle="Entscheidung",
+                        error="Nacharbeit, Sonderfreigabe oder Ausschuss wählen.")
+    dv.add(f"K{MS_ERSTE}:K{letzte}")
+    ws.add_data_validation(dv)
+    dv2 = DataValidation(type="list", formula1="MessmittelListe", allow_blank=True, showErrorMessage=False)
+    dv2.add(f"J{MS_ERSTE}:J{letzte}")
+    dv2.add("C7")
+    ws.add_data_validation(dv2)
+    rot = PatternFill("solid", fgColor="FFC7CE")
+    gruen = PatternFill("solid", fgColor="C6EFCE")
+    orange = PatternFill("solid", fgColor="FFEB9C")
+    bereich = f"I{MS_ERSTE}:I{letzte}"
+    ws.conditional_formatting.add(bereich, FormulaRule(formula=[f'$I{MS_ERSTE}="n.i.O."'], fill=rot, font=Font(bold=True, color="9C0006")))
+    ws.conditional_formatting.add(bereich, FormulaRule(formula=[f'$I{MS_ERSTE}="i.O."'], fill=gruen, font=Font(color="006100")))
+    ws.conditional_formatting.add(bereich, FormulaRule(formula=[f'$I{MS_ERSTE}="ungültig"'], fill=orange))
+    ws.conditional_formatting.add(f"K{MS_ERSTE}:K{letzte}", FormulaRule(
+        formula=[f'AND($I{MS_ERSTE}="n.i.O.",$K{MS_ERSTE}="")'], fill=PatternFill("solid", fgColor="F4B084")))
+    ws.conditional_formatting.add(f"A{MS_ERSTE}:B{letzte}", FormulaRule(
+        formula=[f'$Q{MS_ERSTE}="ja"'], font=Font(bold=True)))
+    ws.freeze_panes = f"C{MS_ERSTE}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.protection.sheet = True
+    ws.protection.formatColumns = False
+    ws.protection.autoFilter = False
+
+
+def blatt_offen(wb):
+    ws = wb.create_sheet("Offene Protokolle")
+    titel(ws, "Offene Protokolle", "In Arbeit, Nacharbeit und wartend auf Freigabe – Zeile anklicken und öffnen")
+    kopf = [("Produktnummer", 16), ("Status", 20), ("Artikel", 14), ("Auftrag", 12), ("Kunde", 20),
+            ("Prüfer", 16), ("Begonnen", 16), ("Geändert am", 16), ("Merkmale", 9), ("gemessen", 9),
+            ("n.i.O.", 8), ("offen", 8), ("bearbeitet von", 16)]
+    for i, (t, b) in enumerate(kopf, start=1):
+        c = ws.cell(5, i, t)
+        c.font = weiss_fett
+        c.fill = kopf_fill
+        ws.column_dimensions[c.column_letter].width = b
+    for z in range(6, 2006):
+        ws.cell(z, 7).number_format = ws.cell(z, 8).number_format = "DD.MM.YYYY HH:MM"
+    ws.conditional_formatting.add("A6:M2005", FormulaRule(formula=['$B6="Wartet auf Freigabe"'],
+                                  fill=PatternFill("solid", fgColor="FCE4D6")))
+    ws.conditional_formatting.add("A6:M2005", FormulaRule(formula=['$B6="Nacharbeit"'],
+                                  fill=PatternFill("solid", fgColor="FFF2CC")))
+    ws.freeze_panes = "A6"
+    ws.protection.sheet = True
+
+
+def blatt_auswertung(wb):
+    ws = wb.create_sheet("Auswertung")
+    titel(ws, "Auswertung · Prozessfähigkeit", "Alle abgeschlossenen Protokolle eines Artikels")
+    for z, text in enumerate(["Artikelnummer", "Stand (leer = alle)", "von (Datum)", "bis (Datum)", "Merkmal-Nr (Verlauf)"], start=3):
+        ws.cell(z, 2, text).font = fett
+        c = ws.cell(z, 3)
+        c.fill = eingabe_fill
+        c.border = rahmen
+        c.protection = Protection(locked=False)
+    ws["C5"].number_format = ws["C6"].number_format = "DD.MM.YYYY"
+    for z, text in enumerate(["Protokolle", "i.O.", "mit Sonderfreigabe", "Ausschuss"], start=3):
+        ws.cell(z, 5, text).font = fett
+        ws.cell(z, 6).fill = grau_fill
+    kopf = [("Nr", 6), ("Merkmal", 26), ("Art", 10), ("OGW", 10), ("UGW", 10), ("n", 6), ("Mittelwert", 11),
+            ("Std.-Abw.", 10), ("Min", 10), ("Max", 10), ("Cp", 7), ("Cpk", 7), ("n.i.O.", 7), ("Bewertung", 22)]
+    for i, (t, b) in enumerate(kopf, start=1):
+        c = ws.cell(10, i, t)
+        c.font = weiss_fett
+        c.fill = kopf_fill
+        ws.column_dimensions[c.column_letter].width = b
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["E"].width = 18
+    for z in range(11, 2011):
+        for sp in (4, 5, 7, 9, 10):
+            ws.cell(z, sp).number_format = "0.0000"
+        ws.cell(z, 8).number_format = "0.00000"
+        ws.cell(z, 11).number_format = ws.cell(z, 12).number_format = "0.00"
+    ws.conditional_formatting.add("L11:L2010", FormulaRule(formula=['AND(ISNUMBER($L11),$L11<1)'],
+                                  fill=PatternFill("solid", fgColor="FFC7CE")))
+    ws.conditional_formatting.add("L11:L2010", FormulaRule(formula=['AND(ISNUMBER($L11),$L11>=1,$L11<1.33)'],
+                                  fill=PatternFill("solid", fgColor="FFEB9C")))
+    ws.conditional_formatting.add("L11:L2010", FormulaRule(formula=['AND(ISNUMBER($L11),$L11>=1.33)'],
+                                  fill=PatternFill("solid", fgColor="C6EFCE")))
+    ws.freeze_panes = "A11"
+    ws.protection.sheet = True
+
+
+def blatt_messmittel(wb):
+    ws = wb.create_sheet("Messmittel")
+    titel(ws, "Messmittel · Kalibrierstatus", "Gepflegt wird in Stammdaten.xlsx – hier nur die Übersicht")
+    kopf = [("Nr", 10), ("Bezeichnung", 28), ("Art", 18), ("Standort", 16), ("Letzte Kalibrierung", 14),
+            ("Intervall (Monate)", 11), ("Nächste Kalibrierung", 14), ("Status", 20)]
+    for i, (t, b) in enumerate(kopf, start=1):
+        c = ws.cell(5, i, t)
+        c.font = weiss_fett
+        c.fill = kopf_fill
+        c.alignment = Alignment(wrap_text=True)
+        ws.column_dimensions[c.column_letter].width = b
+    for z in range(6, 2006):
+        ws.cell(z, 5).number_format = ws.cell(z, 7).number_format = "DD.MM.YYYY"
+    for text, farbe in (("abgelaufen", "FFC7CE"), ("keine Kalibrierdaten", "FFC7CE"),
+                        ("bald fällig", "FFEB9C"), ("gültig", "C6EFCE")):
+        ws.conditional_formatting.add("H6:H2005", FormulaRule(formula=[f'$H6="{text}"'],
+                                      fill=PatternFill("solid", fgColor=farbe)))
+    ws.freeze_panes = "A6"
+    ws.protection.sheet = True
+
+
+def blatt_listen(wb):
+    ws = wb.create_sheet("Listen")
+    ws["A1"] = "Gültige Messmittel (wird vom Programm gefüllt)"
+    wb.defined_names["MessmittelListe"] = DefinedName("MessmittelListe", attr_text="Listen!$A$2:$A$1000")
+    ws.sheet_state = "hidden"
 
 
 def blatt_pruefplan(wb):
@@ -202,7 +370,8 @@ def blatt_iso_tabelle(wb):
 def blatt_system(wb):
     ws = wb.create_sheet("System")
     for z, text in enumerate(["Geladene Prüfplan-Datei", "Zeitstempel der Datei",
-                              "Basisordner (leer = automatisch)", "Version"], start=1):
+                              "Basisordner (leer = automatisch)", "Version", "Geöffnetes Protokoll",
+                              "Zeitstempel Protokoll", "Protokoll bearbeitbar"], start=1):
         ws.cell(z, 1, text).font = fett
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 80
@@ -212,14 +381,19 @@ def blatt_system(wb):
 def messprotokoll():
     wb = Workbook()
     blatt_start(wb)
+    blatt_messung(wb)
+    blatt_offen(wb)
     blatt_pruefplan(wb)
+    blatt_auswertung(wb)
+    blatt_messmittel(wb)
     blatt_rechner(wb)
     blatt_iso_tabelle(wb)
+    blatt_listen(wb)
     blatt_system(wb)
     wb.save(ZIEL / "Messprotokoll.xlsx")
 
 
-def stammdaten():
+def stammdaten(ziel=None, messmittel=()):
     wb = Workbook()
     ws = wb.active
     ws.title = "Personen"
@@ -251,6 +425,9 @@ def stammdaten():
         mm.cell(z, 7).number_format = "DD.MM.YYYY"
         mm.cell(z, 9, f'=IF(OR(G{z}="",H{z}=""),"",EDATE(G{z},H{z}))').number_format = "DD.MM.YYYY"
         mm.cell(z, 10, f'=IF(I{z}="","",IF(I{z}<TODAY(),"abgelaufen",IF(I{z}-TODAY()<=30,"bald fällig","gültig")))')
+    for z, eintrag in enumerate(messmittel, start=2):
+        for sp, wert in enumerate(eintrag, start=1):
+            mm.cell(z, sp, wert)
     mm.freeze_panes = "A2"
     mm.conditional_formatting.add("J2:J1001", FormulaRule(formula=['$J2="abgelaufen"'], font=Font(color="C00000", bold=True)))
     mm.conditional_formatting.add("J2:J1001", FormulaRule(formula=['$J2="bald fällig"'], font=Font(color="C65911", bold=True)))
@@ -264,15 +441,16 @@ def stammdaten():
         "  Solange niemand die Rolle Stammdaten hat, läuft das Programm im Einrichtungsmodus:",
         "  dann darf jeder Prüfpläne anlegen. Bitte zuerst die Stammdaten-Gruppe eintragen!",
         "",
-        "Messmittel (wird in Phase 4 an die Erfassung angebunden)",
+        "Messmittel",
         "  Letzte Kalibrierung + Intervall ergeben Nächste Kalibrierung und Status.",
+        "  Abgelaufene Messmittel oder solche ohne Kalibrierdaten sind bei der Messung gesperrt.",
         "",
         "Diese Datei darf nur die Stammdaten-Gruppe ändern (Ordnerrechte vom IT setzen lassen).",
     ]
     for i, t in enumerate(zeilen, start=3):
         an.cell(i, 1, t).font = fett if t and not t.startswith(" ") else Font()
     an.column_dimensions["A"].width = 100
-    wb.save(ZIEL / "Stammdaten.xlsx")
+    wb.save(ziel or (ZIEL / "Stammdaten.xlsx"))
 
 
 if __name__ == "__main__":

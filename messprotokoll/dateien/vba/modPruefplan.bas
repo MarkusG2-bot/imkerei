@@ -49,10 +49,6 @@ Private Function PP() As Worksheet
     Set PP = ThisWorkbook.Worksheets(BLATT_PP)
 End Function
 
-Private Function Sys() As Worksheet
-    Set Sys = ThisWorkbook.Worksheets(BLATT_SYSTEM)
-End Function
-
 ' ---------- Pfade ----------
 
 Public Function PruefplanOrdner(ByVal artikel As String) As String
@@ -192,7 +188,7 @@ Public Sub PruefplanSpeichern()
 
     ziel = PruefplanDatei(artikel, stand)
     ' Artikelnummer oder Stand dürfen nach dem Laden nicht von Hand geändert werden
-    If status = STATUS_GELADEN And LCase(TextVon(Sys().Range("B1").Value)) <> LCase(ziel) Then
+    If status = STATUS_GELADEN And LCase(TextVon(Sys().Range(SYS_PP_DATEI).Value)) <> LCase(ziel) Then
         MsgBox "Artikelnummer oder Zeichnungsstand wurden geändert." & vbLf & _
             "Für einen neuen Stand bitte ""Neuer Zeichnungsstand"" verwenden," & vbLf & _
             "für einen anderen Artikel ""Neuer Prüfplan"".", vbExclamation
@@ -209,16 +205,16 @@ Public Sub PruefplanSpeichern()
                 "Für Änderungen bitte ""Neuer Zeichnungsstand"" verwenden.", vbExclamation
             Exit Sub
         End If
-        If LCase(TextVon(Sys().Range("B1").Value)) <> LCase(ziel) Then
+        If LCase(TextVon(Sys().Range(SYS_PP_DATEI).Value)) <> LCase(ziel) Then
             MsgBox "Stand " & stand & " von Artikel " & artikel & " existiert bereits." & vbLf & _
                 "Bitte diesen Stand laden, wenn er geändert werden soll.", vbExclamation
             Exit Sub
         End If
-        If Not IstZahl(Sys().Range("B2").Value2) Then
+        If Not IstZahl(Sys().Range(SYS_PP_ZEIT).Value2) Then
             MsgBox "Bitte den Prüfplan neu laden.", vbExclamation
             Exit Sub
         End If
-        If Abs(CDbl(FileDateTime(ziel)) - CDbl(Sys().Range("B2").Value2)) > 0.00001 Then
+        If Abs(CDbl(FileDateTime(ziel)) - CDbl(Sys().Range(SYS_PP_ZEIT).Value2)) > 0.00001 Then
             MsgBox "Die Datei wurde inzwischen von jemand anderem geändert." & vbLf & _
                 "Bitte den Prüfplan neu laden und die Änderungen erneut eintragen.", vbExclamation
             Exit Sub
@@ -414,27 +410,34 @@ End Function
 Private Sub SchreibeDatei(ByVal ziel As String, ByVal daten As Variant, ByVal letzte As Long)
     Dim wb As Workbook, wsK As Worksheet, wsM As Worksheet, tmp As String
     Dim kopf As Variant, werte() As Variant, z As Long, sp As Long, ogw As Variant, ugw As Variant, f As String
-    Dim ws As Worksheet
+    Dim ws As Worksheet, paar As Variant, anzahl As Long, zi As Long
 
     Set ws = PP()
-    ReDim werte(1 To letzte + 1, 1 To PP_SPALTEN)
+    ' Leerzeilen weglassen, damit die Merkmale lückenlos gespeichert werden
+    anzahl = 0
+    For z = 1 To letzte
+        If ZeileHatInhalt(daten, z) Then anzahl = anzahl + 1
+    Next z
+    ReDim werte(1 To anzahl + 1, 1 To PP_SPALTEN)
     For sp = 1 To PP_SPALTEN
         werte(1, sp) = ws.Cells(PP_ERSTE - 1, sp).Value
     Next sp
+    zi = 1
     For z = 1 To letzte
-        For sp = 1 To PP_SPALTEN
-            werte(z + 1, sp) = daten(z, sp)
-        Next sp
-        ' Grenzwerte als feste Zahlen ablegen (nicht als Formel)
-        werte(z + 1, SP_OGW) = Empty
-        werte(z + 1, SP_UGW) = Empty
         If ZeileHatInhalt(daten, z) Then
+            zi = zi + 1
+            For sp = 1 To PP_SPALTEN
+                werte(zi, sp) = daten(z, sp)
+            Next sp
+            ' Grenzwerte als feste Zahlen ablegen (nicht als Formel)
+            werte(zi, SP_OGW) = Empty
+            werte(zi, SP_UGW) = Empty
             If Grenzwerte(daten(z, SP_ART), daten(z, SP_NENN), daten(z, SP_PASSUNG), _
                     daten(z, SP_OBEN), daten(z, SP_UNTEN), ogw, ugw, f) Then
-                werte(z + 1, SP_OGW) = ogw
-                werte(z + 1, SP_UGW) = ugw
+                werte(zi, SP_OGW) = ogw
+                werte(zi, SP_UGW) = ugw
             End If
-            werte(z + 1, SP_ART) = ArtNormal(daten(z, SP_ART))
+            werte(zi, SP_ART) = ArtNormal(daten(z, SP_ART))
         End If
     Next z
 
@@ -448,20 +451,21 @@ Private Sub SchreibeDatei(ByVal ziel As String, ByVal daten As Variant, ByVal le
         Array("Geändert von", BenutzerAnzeige()), _
         Array("Geändert am", Now), _
         Array("Entfallene Merkmale", ws.Range(PP_ENTFALLEN).Value), _
-        Array("Anzahl Merkmale", letzte), _
+        Array("Anzahl Merkmale", anzahl), _
         Array("Programmversion", PROGRAMM_VERSION))
 
     Application.ScreenUpdating = False
     Set wb = Workbooks.Add(xlWBATWorksheet)
     Set wsM = wb.Worksheets(1)
     wsM.Name = "Merkmale"
-    wsM.Range(wsM.Cells(1, 1), wsM.Cells(letzte + 1, PP_SPALTEN)).Value = werte
+    wsM.Range(wsM.Cells(1, 1), wsM.Cells(anzahl + 1, PP_SPALTEN)).Value = werte
     wsM.Rows(1).Font.Bold = True
     Set wsK = wb.Worksheets.Add(Before:=wsM)
     wsK.Name = "Kopf"
     For z = 0 To UBound(kopf)
-        wsK.Cells(z + 1, 1).Value = kopf(z)(0)
-        wsK.Cells(z + 1, 2).Value = kopf(z)(1)
+        paar = kopf(z)
+        wsK.Cells(z + 1, 1).Value = paar(0)
+        wsK.Cells(z + 1, 2).Value = paar(1)
     Next z
     wsK.Columns("A:B").AutoFit
 
@@ -480,13 +484,13 @@ End Sub
 
 ' Liest eine Prüfplan-Datei. kopf (Dictionary) darf Nothing sein.
 Public Function LiesDatei(ByVal datei As String, ByVal kopf As Object, ByRef daten As Variant, ByRef anzahl As Long) As Boolean
-    Dim wb As Workbook, k As Variant, z As Long, scr As Boolean, letzteZ As Long
+    Dim wb As Workbook, k As Variant, z As Long, scr As Boolean, letzteZ As Long, warOffen As Boolean
 
     If Not DateiExistiert(datei) Then Exit Function
     scr = Application.ScreenUpdating
     Application.ScreenUpdating = False
     On Error GoTo Fehler
-    Set wb = Workbooks.Open(Filename:=datei, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
+    Set wb = MappeLesen(datei, warOffen)
     If Not kopf Is Nothing Then
         k = wb.Worksheets("Kopf").Range("A1:B30").Value
         For z = 1 To UBound(k, 1)
@@ -501,14 +505,14 @@ Public Function LiesDatei(ByVal datei As String, ByVal kopf As Object, ByRef dat
             daten = .Range(.Cells(2, 1), .Cells(letzteZ, PP_SPALTEN)).Value
         End If
     End With
-    wb.Close SaveChanges:=False
+    MappeSchliessen wb, warOffen
     Application.ScreenUpdating = scr
     LiesDatei = True
     Exit Function
 Fehler:
     Application.ScreenUpdating = scr
     On Error Resume Next
-    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    MappeSchliessen wb, warOffen
 End Function
 
 Private Sub LadeDatei(ByVal datei As String)
@@ -605,10 +609,10 @@ Private Function VerwerfenOk() As Boolean
 End Function
 
 Private Sub MerkeDatei(ByVal datei As String, ByVal zeit As Double)
-    Sys().Range("B1").Value = datei
+    Sys().Range(SYS_PP_DATEI).Value = datei
     If datei = "" Then
-        Sys().Range("B2").ClearContents
+        Sys().Range(SYS_PP_ZEIT).ClearContents
     Else
-        Sys().Range("B2").Value2 = zeit
+        Sys().Range(SYS_PP_ZEIT).Value2 = zeit
     End If
 End Sub

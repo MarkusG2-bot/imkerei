@@ -13,34 +13,46 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
 - 2026-10-17: Alle Grundfragen beantwortet, `ARCHITEKTUR.md` als Entwurf erstellt.
   **Nächster Schritt: Freigabe der Architektur durch den Nutzer, dann Phase 1 bauen.**
 - 2026-10-17: Alle Fragen geklärt. Nutzer hat „Go" für Phase 1 gegeben.
-- 2026-10-17: **Phase 1 gebaut (Version 0.1.0)**, noch **nicht in echtem Excel getestet**.
-  Anleitung + Testliste: `EINRICHTEN.md`. Nächster Schritt: Nutzer testet unter Windows,
-  danach Phase 2 (Erfassung).
+- 2026-10-17: Phase 1 gebaut (0.1.0).
+- 2026-10-17: Nutzer hat kein Excel zum Testen → Test am Firmen-PC empfohlen. Wunsch: alles auf
+  einmal umsetzen, nur einmal einfügen, ein großer Test.
+- 2026-10-17: **Version 1.0.0 mit allen Phasen 1–5 + Installationsprogramm + Testdaten gebaut.**
+  Nächster Schritt: großer Test durch Nutzer (TESTPLAN.md), Fehler mit Schrittnummer melden.
 
-## Stand Phase 1 (Version 0.1.0)
-- Dateien: `dateien/Messprotokoll.xlsx` (+ VBA-Import → .xlsm), `dateien/Stammdaten.xlsx`,
-  `dateien/vba/*.bas` (Windows-1252, CRLF für Excel-Import)
-- Quellcode UTF-8 in `quellcode/`; erzeugt mit `python3 werkzeuge/erzeuge.py`
-- ISO-286-Daten einzige Quelle: `werkzeuge/iso286_daten.py`
-- Tests mit LibreOffice (VBA-Modus): `tests/test_logik.py` (102 Prüfungen, gegen
-  Tabellenwerte ISO 286 / ISO 2768), `tests/syntax_pruefung.py` (jedes Modul einzeln).
-  Excel-Abläufe (Dateien, Knöpfe, Formeln) können hier nicht getestet werden.
-- Module: modISO286Daten (erzeugt), modISO286, modLogik (rein, getestet), modKonfig
-  (Pfade, Rollen, Dateihilfen), modPruefplan, modFormeln (PM_OGW/PM_UGW/PM_PRUEFUNG/PM_ABMASS),
-  modEinrichten (Knöpfe, Formeln, Ordner)
-- Zusätzlich eingebaut: **Allgemeintoleranz ISO 2768-1** (f/m/c/v) bei Art „Maß“
-  im Feld Passung (z. B. `2768-m`), Prüf-Spalte N mit Fehlertext je Zeile.
-- Basisordner = Elternordner von `Programm\` (oder Blatt System!B3).
-- Prüfplan-Datei: Blätter „Kopf“ (Schlüssel/Wert) und „Merkmale“ (13 Spalten, OGW/UGW als Zahl).
-- Speichern über Zwischendatei `~speichern_...` + Umbenennen; Konflikt-Erkennung über
-  Datei-Zeitstempel; alter Stand wird beim ersten Speichern des neuen Stands schreibgeschützt.
-- Rollen aus Stammdaten!Personen (x in Spalten Prüfer/Freigeber/Stammdaten), 5 min Cache;
-  Einrichtungsmodus, solange niemand Rolle Stammdaten hat.
+## Stand Version 1.0.0 (alle Phasen 1–5)
+**Lieferpaket:** `Messprotokoll_1.0.0.zip` (im Ordner messprotokoll) → entpacken →
+`INSTALLIEREN.bat` (PowerShell + Excel-COM: importiert VBA, fügt DieseArbeitsmappe-Code ein,
+speichert `Programm\Messprotokoll.xlsm` schreibgeschützt, Ordner, Testdaten, Nutzer mit allen Rollen,
+optional vertrauenswürdiger Speicherort). Fallback: manuelle Einrichtung (ANLEITUNG.md).
+**Großer Test:** `TESTPLAN.md` + `Testliste.xlsx` (36 Schritte, erwartete Cpk-Werte aus Testdaten).
+**Noch nicht in echtem Excel getestet** – Nutzer macht den großen Test unter Windows.
+
+Aufbau:
+- Blätter: Start, Messung, Offene Protokolle, Prüfplan, Auswertung, Messmittel, ISO-Rechner,
+  ISO286, Listen (versteckt, Messmittel-Auswahl), System (versteckt, Zustand)
+- Module: modKonfig (Pfade, Blattschutz, MappeLesen), modDateien (Datei/CSV/Sperren, ohne Excel),
+  modLogik (Rechenlogik, Status, Statistik, Messmittelstatus), modISO286(+Daten), modStammdaten
+  (Rollen, Messmittel), modPruefplan, modMessung, modUebersicht, modAuswertung, modFormeln (UDFs),
+  modEinrichten (Knöpfe, Formeln, Workbook_Open/Close), modSelbsttest (erzeugt aus tests/testfaelle.py)
+- Protokoll = CSV (Windows-1252, `;`, Zahlen mit Punkt, Datum `yyyy-mm-dd hh:nn:ss`),
+  15 Kopfspalten + 18 Merkmalsspalten je Zeile. Ablage je Status:
+  Daten\Entwurf (In Arbeit, Nacharbeit), Daten\Freigabe, Daten\Archiv\Jahr\Artikel (schreibgeschützt),
+  PDF\Jahr\Artikel. Index `System\Index\<Produktnr>.txt` → relativer Pfad. Sperre `System\Sperren\*.lock`
+  (12 h gültig, übernehmbar). Dateiname: `/` → `_`.
+- Status: In Arbeit → (Abschließen) Abgeschlossen | Wartet auf Freigabe | Nacharbeit.
+  Ausschuss hat Vorrang, dann offene n.i.O. → Freigabe, dann Nacharbeit, dann Sonderfreigabe.
+  Prüfer: Nacharbeit; Freigeber: Sonderfreigabe/Ausschuss + Pflicht-Begründung. Entscheidung wird
+  mit Name/Zeit abgezeichnet; geänderte Entscheidung wird neu abgezeichnet (Vergleich mit gespeicherter Datei).
+- Messmittel: beim Speichern geprüft, wenn Istwert/Messmittel neu; abgelaufen oder ohne
+  Kalibrierdaten = gesperrt; fehlendes Messmittel erst beim Abschließen Fehler.
+- Prüfplan-Stand wird schreibgeschützt, sobald ein Protokoll ihn verwendet.
+- Auswertung: alle Archiv-Protokolle eines Artikels, Filter Stand/Zeitraum, Schlüssel Nr+OGW+UGW,
+  Cp/Cpk (Stichproben-Std.-Abw.), Verlauf als Liniendiagramm.
+- Tests: `sh tests/alle_tests.sh` (Deklarationen, Syntax, 102+48 Logik, 98 Selbsttest, Testdaten/Cpk).
+- Paket bauen: `python3 werkzeuge/paket.py`
 
 ## Merkposten für spätere Phasen
-- Phase 2: Prüfplan-Stand sperren, sobald das erste Protokoll ihn verwendet.
-- Phase 2: Index `System\Index\<Produktnummer>.txt` für schnelle Suche.
-- Phase 4: Messmittel-Blatt ist in Stammdaten schon angelegt (Kalibrierstatus per Formel).
+- Nach dem großen Test: Rückmeldungen einarbeiten, dann Echtbetrieb (IT: Rechte, GPO für Makros).
 - Später: PDF-Import (nur Office-Bordmittel), Messgeräte-/CSV-Import, ggf. Updater für Module.
 
 ## Arbeitsregeln
@@ -238,3 +250,7 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | VBA als Textdateien im Repo, einmaliger Import in Excel | .xlsm nicht unter Linux erzeugbar, Versionierung |
 | 2026-10-17 | ISO 2768-1 Allgemeintoleranzen zusätzlich unterstützt | Bei Dreh-/Frästeilen Standard |
 | 2026-10-17 | Logik-Tests über LibreOffice im VBA-Modus | Kein Excel in der Entwicklungsumgebung |
+| 2026-10-17 | Alle Phasen auf einmal, Installation per INSTALLIEREN.bat | Wunsch: nur einmal einfügen, ein großer Test |
+| 2026-10-17 | Protokolle als CSV statt xlsx | Schnell lesbar für Auswertung über tausende Protokolle |
+| 2026-10-17 | Programm-Datei schreibgeschützt im Netz | 80 Nutzer öffnen ohne Rückfrage |
+| 2026-10-17 | Prüfer darf Nacharbeit, Freigeber Sonderfreigabe/Ausschuss mit Begründung | Wunsch Nutzer |

@@ -2,8 +2,7 @@
 import erzeuge_dateien
 import erzeuge_vba
 
-erzeuge_vba.daten_modul()
-erzeuge_vba.import_dateien()
+erzeuge_vba.alles()
 erzeuge_dateien.ZIEL.mkdir(exist_ok=True)
 erzeuge_dateien.messprotokoll()
 erzeuge_dateien.stammdaten()

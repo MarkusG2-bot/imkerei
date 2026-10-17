@@ -192,3 +192,140 @@ Public Function TextVon(ByVal v As Variant) As String
     If IsEmpty(v) Or IsNull(v) Or IsError(v) Then Exit Function
     TextVon = CStr(v)
 End Function
+
+' ---------- Messung ----------
+
+' Bewertung eines Messwerts je Merkmalsart.
+' Attribut: Eingabe i.O./n.i.O. (auch io, ok, nio, nok). Rückgabe "" wenn leer, "ungültig" bei falscher Eingabe.
+Public Function BewertungMerkmal(ByVal art As Variant, ByVal ist As Variant, ByVal ogw As Variant, ByVal ugw As Variant) As String
+    Dim t As String
+    If IstLeer(ist) Then Exit Function
+    If ArtNormal(art) = ART_ATTRIBUT Then
+        t = LCase(Replace(Replace(Trim(TextVon(ist)), ".", ""), " ", ""))
+        Select Case t
+            Case "io", "ok", "i": BewertungMerkmal = "i.O."
+            Case "nio", "nok", "n": BewertungMerkmal = "n.i.O."
+            Case Else: BewertungMerkmal = "ungültig"
+        End Select
+    ElseIf Not IstZahl(ist) Then
+        BewertungMerkmal = "ungültig"
+    Else
+        BewertungMerkmal = Bewertung(ist, ogw, ugw)
+    End If
+End Function
+
+' Status nach dem Abschließen aus Bewertungen und Entscheidungen ableiten.
+' Rückgabe: Status; ergebnis wird bei "Abgeschlossen" gesetzt; offen = n.i.O. ohne Entscheidung
+Public Function Abschlussstatus(ByVal bew As Variant, ByVal ents As Variant, _
+        ByRef ergebnis As String, ByRef offen As Long) As String
+    Dim i As Long, aus As Boolean, nach As Boolean, sonder As Boolean
+    ergebnis = ""
+    offen = 0
+    For i = LBound(bew) To UBound(bew)
+        If TextVon(bew(i)) = "n.i.O." Then
+            Select Case TextVon(ents(i))
+                Case "Ausschuss": aus = True
+                Case "Nacharbeit": nach = True
+                Case "Sonderfreigabe": sonder = True
+                Case Else: offen = offen + 1
+            End Select
+        End If
+    Next i
+    If aus Then
+        Abschlussstatus = "Abgeschlossen"
+        ergebnis = "Ausschuss"
+    ElseIf offen > 0 Then
+        Abschlussstatus = "Wartet auf Freigabe"
+    ElseIf nach Then
+        Abschlussstatus = "Nacharbeit"
+    ElseIf sonder Then
+        Abschlussstatus = "Abgeschlossen"
+        ergebnis = "i.O. mit Sonderfreigabe"
+    Else
+        Abschlussstatus = "Abgeschlossen"
+        ergebnis = "i.O."
+    End If
+End Function
+
+' ---------- Statistik ----------
+
+' Mittelwert, Standardabweichung (Stichprobe), Minimum, Maximum der ersten n Werte
+Public Sub Statistik(ByVal werte As Variant, ByVal n As Long, ByRef mittel As Double, ByRef s As Double, _
+        ByRef mn As Double, ByRef mx As Double)
+    Dim i As Long, summe As Double, q As Double, x As Double, a As Long
+    mittel = 0: s = 0: mn = 0: mx = 0
+    If n < 1 Then Exit Sub
+    a = LBound(werte)
+    mn = CDbl(werte(a)): mx = mn
+    For i = a To a + n - 1
+        x = CDbl(werte(i))
+        summe = summe + x
+        If x < mn Then mn = x
+        If x > mx Then mx = x
+    Next i
+    mittel = summe / n
+    If n < 2 Then Exit Sub
+    For i = a To a + n - 1
+        q = q + (CDbl(werte(i)) - mittel) ^ 2
+    Next i
+    s = Sqr(q / (n - 1))
+End Sub
+
+' Prozessfähigkeit: Cp (nur mit beiden Grenzen) und Cpk. Empty, wenn nicht berechenbar.
+Public Sub Faehigkeit(ByVal mittel As Double, ByVal s As Double, ByVal ogw As Variant, ByVal ugw As Variant, _
+        ByRef cp As Variant, ByRef cpk As Variant)
+    Dim ko As Variant, ku As Variant
+    cp = Empty: cpk = Empty
+    If s <= 0 Then Exit Sub
+    If IstZahl(ogw) Then ko = (CDbl(ogw) - mittel) / (3 * s)
+    If IstZahl(ugw) Then ku = (mittel - CDbl(ugw)) / (3 * s)
+    If IstZahl(ogw) And IstZahl(ugw) Then cp = (CDbl(ogw) - CDbl(ugw)) / (6 * s)
+    If Not IsEmpty(ko) And Not IsEmpty(ku) Then
+        If ko < ku Then cpk = ko Else cpk = ku
+    ElseIf Not IsEmpty(ko) Then
+        cpk = ko
+    ElseIf Not IsEmpty(ku) Then
+        cpk = ku
+    End If
+End Sub
+
+Public Function FaehigkeitText(ByVal cpk As Variant, ByVal n As Long) As String
+    Dim t As String
+    If n < 2 Then FaehigkeitText = "zu wenig Werte": Exit Function
+    If IsEmpty(cpk) Then FaehigkeitText = "nicht berechenbar": Exit Function
+    If cpk >= 1.67 Then
+        t = "sehr gut"
+    ElseIf cpk >= 1.33 Then
+        t = "fähig"
+    ElseIf cpk >= 1 Then
+        t = "bedingt fähig"
+    Else
+        t = "nicht fähig"
+    End If
+    If n < 25 Then t = t & " (unter 25 Werte)"
+    FaehigkeitText = t
+End Function
+
+' ---------- Messmittel ----------
+
+' Kalibrierstatus: "gültig", "bald fällig" (30 Tage), "abgelaufen", "keine Kalibrierdaten"
+Public Function MessmittelStatus(ByVal letzte As Variant, ByVal intervall As Variant, ByVal stichtag As Date, _
+        ByRef naechste As Variant) As String
+    naechste = Empty
+    If Not IsDate(letzte) Or Not IstZahl(intervall) Then
+        MessmittelStatus = "keine Kalibrierdaten"
+        Exit Function
+    End If
+    If CDbl(intervall) <= 0 Then
+        MessmittelStatus = "keine Kalibrierdaten"
+        Exit Function
+    End If
+    naechste = DateAdd("m", CLng(intervall), CDate(letzte))
+    If naechste < stichtag Then
+        MessmittelStatus = "abgelaufen"
+    ElseIf naechste - stichtag <= 30 Then
+        MessmittelStatus = "bald fällig"
+    Else
+        MessmittelStatus = "gültig"
+    End If
+End Function

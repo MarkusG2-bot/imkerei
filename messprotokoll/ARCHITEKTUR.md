@@ -1,6 +1,6 @@
 # Architektur · Messdatenverwaltung Metalltechnik
 
-Status: **freigegeben** (2026-10-17), Phase 1 gebaut (0.1.0). Grundlage: GEDAECHTNIS.md
+Status: **freigegeben** (2026-10-17), alle Phasen gebaut (1.0.0). Details zum Stand: GEDAECHTNIS.md
 
 ## Rahmen
 - Microsoft 365 Excel mit VBA, Windows
@@ -22,11 +22,11 @@ Messdaten\
   Daten\
     Entwurf\      laufende Protokolle (mit Sperrvermerk, wer gerade bearbeitet)
     Freigabe\     Protokolle mit n.i.O.-Maßen, warten auf Entscheidung
-    Archiv\       <Jahr>\<Artikel>\<Protokoll-Nr>.csv  (nur lesbar, Ordnerrechte IT)
+    Archiv\       <Jahr>\<Artikel>\<Produktnummer>.csv  (schreibgeschützt)
   PDF\            <Jahr>\<Artikel>\<Protokoll-Nr>.pdf
   Auswertung\     Auswertung.xlsx         (Power Query, Cpk je Artikel/Merkmal)
   Import\         später: Messmaschinen-CSV
-  System\         Zähler für Protokoll-Nummern, Protokoll der Änderungen
+  System\         Index\ (Produktnummer → Datei), Sperren\ (wer bearbeitet gerade)
 ```
 
 ## Rollen (Erkennung über Windows-Benutzername)
@@ -79,15 +79,15 @@ Nr., Art, Messbereich, Standort, letzte/nächste Kalibrierung, Status.
 Abgelaufene Messmittel sind bei der Erfassung gesperrt; Warnliste vor Ablauf.
 
 ## Bau in Phasen
-1. Stammdaten + Prüfplan (inkl. ISO 286, Stand kopieren)
-2. Erfassung, i.O./n.i.O., Speichern, PDF
-3. Freigabe-Ablauf
-4. Messmittelverwaltung mit Kalibrierwarnung
-5. Auswertung mit Cpk
+1. Stammdaten + Prüfplan (inkl. ISO 286, Stand kopieren) – erledigt
+2. Erfassung, i.O./n.i.O., Speichern, PDF – erledigt
+3. Freigabe-Ablauf – erledigt
+4. Messmittelverwaltung mit Kalibrierwarnung – erledigt
+5. Auswertung mit Cpk – erledigt
 6. Später: PDF-Import aus Zeichnung, Messgeräte-/CSV-Import
 
 ## Technische Umsetzung
-- VBA-Code liegt als Textdateien (.bas/.frm) im Repo → nachvollziehbare Versionen.
-- Excel-Dateien werden hier erzeugt; der VBA-Code wird einmalig in Excel eingespielt.
+- VBA-Code liegt als Textdateien (.bas) im Repo → nachvollziehbare Versionen.
+- Excel-Vorlage wird hier erzeugt; INSTALLIEREN.bat baut daraus mit Excel die .xlsm.
 - Getestet wird die Logik (Toleranzen, ISO 286, Cpk) hier automatisch;
   die Bedienung muss unter Windows/Excel getestet werden.
