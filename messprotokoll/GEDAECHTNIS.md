@@ -98,13 +98,35 @@ Eine Messdatenverwaltung für die Metalltechnik auf Basis von Excel aufbauen
 - Messgeräte-Integration vorbereiten: USB-Messschieber arbeiten meist wie eine
   Tastatur (sofort nutzbar); Messmaschinen-Export (CSV) per Import-Makro später.
 
+## Antworten Runde 4 (2026-10-17)
+- Prüfpläne werden **von Hand eingetippt**. Wunsch: **Import aus Zeichnungs-PDF**,
+  sodass nur noch Nummerierung und kleine Korrekturen nötig sind.
+- Freigabe n.i.O.: **nur eine bestimmte Gruppe**
+- Entscheidung bei n.i.O.: **Sonderfreigabe, Nacharbeit, Ausschuss** (alle drei)
+- PDF-Protokoll-Kopf: **Artikelnummer, Produktnummer, Auftragsnummer, Kunde**
+- Aufbewahrung: **10 Jahre**
+
+### Folgerungen daraus
+- PDF-Import: machbar nur bei **PDFs aus CAD (Text im PDF)**, nicht bei Scans.
+  Weg: Text-Auslesen mit freiem Hilfsprogramm (z. B. pdftotext auf dem Netzlaufwerk),
+  Makro erkennt Muster wie `Ø20 H7`, `45 ±0,1`, `R5`, Form/Lage-Angaben →
+  Vorschlagsliste, die der Nutzer prüft, nummeriert und übernimmt.
+  Grenzen: Form/Lage-Symbole und Zuordnung zu Ballon-Nummern oft unzuverlässig.
+  Zuerst mit echten Beispiel-PDFs testen. Bessere Alternative prüfen: Merkmalsliste
+  direkt aus dem CAD-Programm exportieren.
+- 10 Jahre bei 30 Protokollen/Tag ≈ 75.000 Protokolldateien, ca. 70 Mio. Messwerte
+  → Ordnerablage nach Artikel/Jahr bestätigt; Schreibschutz für abgeschlossene
+  Protokolle über Ordnerrechte (IT) plus PDF-Kopie.
+
 ## Datenmodell-Entwurf
 - **Prüfplan** (je Artikel + Zeichnungsstand): Merkmal-Nr. (Ballon-Nr.), Bezeichnung,
   Merkmalsart, Nennmaß, Passung/Toleranzen, OGW, UGW, Messmittel-Typ, Kritisch ja/nein
-- **Protokoll-Kopf**: Protokoll-Nr., Artikel, Zeichnungsstand, Auftrag, Teil-Nr./Charge,
+- **Protokoll-Kopf**: Protokoll-Nr., Artikelnummer, Produktnummer, Auftragsnummer, Kunde,
+  Zeichnungsstand, Teil-Nr./Charge,
   Prüfer, Datum, Status
 - **Messwert**: Protokoll-Nr., Merkmal-Nr., Istwert, Abweichung, i.O./n.i.O.,
-  Messmittel-Nr., Freigabe (wer, wann, Begründung)
+  Messmittel-Nr., Entscheidung bei n.i.O. (Sonderfreigabe / Nacharbeit / Ausschuss,
+  wer, wann, Begründung)
 - **Messmittel**: Nr., Art, Messbereich, Standort, letzte/nächste Kalibrierung, Status
 - **Personen**: Windows-Benutzer, Name, Rolle (Prüfer / Freigeber / Admin)
 
@@ -149,3 +171,6 @@ Vorschlag als Diskussionsgrundlage:
 | 2026-10-17 | Ablage nach Artikel/Jahr, Auswertung pro Artikel | Datenmenge mehrere Mio. Werte/Jahr |
 | 2026-10-17 | Freigabe nur für n.i.O.-Maße (Sonderfreigabe) | Antwort Nutzer |
 | 2026-10-17 | Cpk über mehrere Protokolle je Artikel/Merkmal | 1 Protokoll = 1 Teil |
+| 2026-10-17 | n.i.O.-Entscheidung: Sonderfreigabe/Nacharbeit/Ausschuss, nur Freigabe-Gruppe | Antwort Nutzer |
+| 2026-10-17 | Aufbewahrung 10 Jahre | Antwort Nutzer |
+| 2026-10-17 | PDF-Import als Vorschlagsliste, erst mit Beispiel-PDFs testen | Machbarkeit unsicher |
