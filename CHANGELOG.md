@@ -2,6 +2,23 @@
 
 Neueste Version oben. Die Version steht in der App oben neben „Imkerei“.
 
+## Version 1.2.0 · 26.10.2026 · Stockwaage
+Geänderte Dateien: app.js, arbeit.js, ertrag.js, index.html, style.css, sw.js, stockwaage.js (neu). Unverändert: fachlogik.js, zusatz.js, rechnung.js, verkauf.js, sperrzonen.js, anpassen.js, Manifest. Stand vor der Änderung: Ordner sicherung-1.1.0 (in Imkerei-sicherungen).
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Stockwaage in der App: Waage einrichten und Stand verbinden | Neuer Menüpunkt **Stockwaage**. Anmelden mit Server-Adresse, Benutzername und Passwort. „＋ Waage einrichten“ holt den Kopplungscode und führt durch das Einrichtungs-WLAN der Waage; „📶 Stand verbinden“ zeigt, wie der Abgleich über den Handy-Hotspot vorangeht, oder holt die Daten über Bluetooth ab. |
+| Gewicht und Werte je Stand und Volk sehen | Stockwaage → Stand: Gesamtgewicht, Zunahme heute, Temperatur, Akku, Wetter; Tabelle der Völker mit Gewicht, Tageszunahme, Innentemperatur, Varroa. 📈 zeigt den Verlauf je Volk. Waagen-Nummer und Volk der Stockführung werden zugeordnet; die Stockkarte eines Volks zeigt dann die Waage. |
+| Ereignisse, Videos, Meldungen | Ereignisse der letzten Tage (Schwarm, Räuberei, Eingriff …) mit ▶ für die Videos der Übersichts- und Fluglochkamera, „in die Stockführung übernehmen“. 🔔 Meldungen schaltet Push-Nachrichten fürs Handy ein. |
+| Waage aus der App einstellen | Befehle: Bearbeitung 2 h (ruhig stellen beim Arbeiten), Mess- und Sendetakt (mit Grenze der Sendezeit), Kameras, Varroa-Aufnahme (Serie oder durchgehend), Schwarmvorhersage (Empfindlichkeit, Dauerbetrieb), Waage kalibrieren mit Prüfgewicht (⚖). Startet die Arbeitszeit-Uhr an einem Standplatz mit Waage, geht der Stand selbst in den Bearbeitungsmodus. |
+| Firmware nur nach Start aus der App | Stand → Firmware: „Übernehmen“ stellt eine Version nur bereit, erst **▶ Update starten** spielt sie ein – egal ob die Waage über LoRaWAN, Modem, WLAN oder Hotspot verbunden ist. Anzeige: bereitgestellt / gestartet / beim Master angekommen. |
+| Trachtpotenzial mit echten Messwerten | Standplätze → 🍯 Potenzial zeigt bei einem Standplatz mit Waage die gemessene Zunahme dazu. |
+| Server für mehrere Imker, Daten teilen, Karte | Eigene Konten je Imker. **🔒 Daten teilen**: einzelne Freigaben (Trainingsdaten, Ertrag, Sensordaten, Standort, Karte), jede mit Häkchen „gelesen und einverstanden“ und jederzeit widerrufbar. **🗺 Karte**: Stände anderer Teilnehmer, nur ungefähr (einige hundert Meter verschoben) mit vereinfachten Werten. **👤 Konto**: Passwort ändern, eigene Daten herunterladen, Konto löschen. **🛠 Betrieb** (nur Betreiber): Konten anlegen/sperren/löschen, Karte und Unschärfe, Auswertung, Angaben für die Datenschutzerklärung, Nachweise gelöschter Konten. Link zur Datenschutzerklärung bei der Anmeldung. |
+
+Hinweise: Ohne Stockwaage-Server bleibt der Menüpunkt bei der Anmeldung stehen – alles andere in der App funktioniert wie bisher. Die Anmeldung zum Server wird nicht mit der Datensicherung gespeichert, sondern nur im Browser des Handys. Die Waagen-Zuordnung der Völker und Standplätze ist Teil der Imkerei-Daten.
+
+Geprüft: Syntax aller Dateien. Im Vorschau-Browser gegen einen Test-Server: Anmeldung mit Benutzername, Daten teilen (Häkchen, Erlauben, Standort und Ertrag übertragen), Karte mit verschobenem Stand, Betrieb (Konto anlegen, sperren, Karte einstellen, Auswertung), Firmware-Karte mit „Update starten“, Handyansicht ohne seitliches Rollen. Nicht geprüft: am echten Handy, mit echten Waagen (gibt es noch nicht), Push-Meldungen und Bluetooth-Abholung am Gerät.
+
 ## Version 1.1.0 · 15.10.2026 · Sperrzonen und Völkerdichte
 Geänderte Dateien: app.js, ertrag.js, anpassen.js, index.html, sw.js, sperrzonen.js (neu). Unverändert: fachlogik.js, zusatz.js, rechnung.js, verkauf.js, arbeit.js, style.css, Manifest. Stand vor der Änderung: Ordner sicherung-1.0.0 (in Imkerei-sicherungen).
 

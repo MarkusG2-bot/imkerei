@@ -1,7 +1,7 @@
 // Service Worker: App funktioniert auch ohne Empfang am Bienenstand und meldet fällige Arbeiten.
 importScripts('fachlogik.js');
-const CACHE = 'imkerei-1.1.0'; // Version der App, wird beim Update gesetzt (gleich wie VERSION in app.js)
-const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'rechnung.js', 'verkauf.js', 'arbeit.js', 'ertrag.js', 'sperrzonen.js', 'anpassen.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
+const CACHE = 'imkerei-1.2.0'; // Version der App, wird beim Update gesetzt (gleich wie VERSION in app.js)
+const DATEIEN = ['./', 'index.html', 'style.css', 'fachlogik.js', 'zusatz.js', 'rechnung.js', 'verkauf.js', 'arbeit.js', 'ertrag.js', 'sperrzonen.js', 'stockwaage.js', 'anpassen.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(DATEIEN)).then(() => self.skipWaiting())));
@@ -19,6 +19,14 @@ self.addEventListener('fetch', e => {
   }).catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
 
+// Push-Meldungen vom Stockwaage-Server (Alarm, Hinweis)
+self.addEventListener('push', e => {
+  let n = {};
+  try { n = e.data.json(); } catch { n = { titel: 'Stockwaage', text: e.data?.text() || '' }; }
+  e.waitUntil(self.registration.showNotification(n.titel || 'Stockwaage', { body: n.text || '', icon: 'icon-192.png', badge: 'icon-192.png',
+    tag: `sw-${n.stand || ''}-${n.volk || ''}-${n.art || ''}`, requireInteraction: !!n.dringend, data: { stockwaage: true } }));
+});
+
 // Hintergrundprüfung (nur installierte App unter Android/Chrome, Abstand bestimmt der Browser)
 self.addEventListener('periodicsync', e => {
   if (e.tag === 'imkerei-check') e.waitUntil(benachrichtige(h => self.registration.showNotification(h.titel, meldungOptionen(h))));
@@ -26,5 +34,7 @@ self.addEventListener('periodicsync', e => {
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   if (e.action === 'link' && e.notification.data?.url) return e.waitUntil(self.clients.openWindow(e.notification.data.url));
+  if (e.notification.data?.stockwaage) return e.waitUntil(self.clients.matchAll({ type: 'window' }).then(cs =>
+    cs[0] ? cs[0].focus().then(c => c.navigate('./#stockwaage')) : self.clients.openWindow('./#stockwaage')));
   e.waitUntil(self.clients.matchAll({ type: 'window' }).then(cs => cs[0] ? cs[0].focus() : self.clients.openWindow('./')));
 });

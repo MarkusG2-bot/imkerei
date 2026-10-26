@@ -1,5 +1,5 @@
 // ---------- Daten ----------
-const VERSION = '1.1.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
+const VERSION = '1.2.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
 const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [] });
 let db = laden();
@@ -205,7 +205,7 @@ function bearbeiten(typ, id, vorgabe = {}) {
 }
 
 // ---------- Navigation ----------
-const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['verkauf', 'Verkauf'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['arbeit', 'Arbeitszeit'], ['daten', 'Daten'], ['einstellungen', '⚙ Anpassen']];
+const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voelker', 'Stockführung'], ['behandlungen', 'Bestandsbuch'], ['varroa', 'Varroa-Zähler'], ['ernten', 'Ernte'], ['lager', 'Lager'], ['verkauf', 'Verkauf'], ['finanzen', 'Finanzen'], ['vegetation', 'Vegetation & Wetter'], ['aufgaben', 'Aufgaben'], ['arbeit', 'Arbeitszeit'], ['stockwaage', 'Stockwaage'], ['daten', 'Daten'], ['einstellungen', '⚙ Anpassen']];
 let ansicht = 'start', detailVolk = null, vegId = null, karte = null;
 function gehe(a) { ansicht = a; detailVolk = null; render(); scrollTo(0, 0); }
 function render() {
@@ -214,13 +214,13 @@ function render() {
   uhrLeiste();
   if (karte) { karte.remove(); karte = null; }
   ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen,
-    vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, daten: zeigeDaten, einstellungen: zeigeEinstellungen })[ansicht]();
+    vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, stockwaage: zeigeStockwaage, daten: zeigeDaten, einstellungen: zeigeEinstellungen })[ansicht]();
 }
 const main = () => $('#main');
 const kopf = (titel, knoepfe = '') => `<div class="kopf"><h2>${titel}</h2><div class="zeile">${knoepfe}</div></div>`;
 
 // ---------- Auswertung je Volk ----------
-const letzteDurchsicht = id => db.durchsichten.filter(d => d.volkId === id).sort(nachDatum)[0];
+const letzteDurchsicht = id => db.durchsichten.filter(d => d.volkId === id && d.quelle !== 'waage').sort(nachDatum)[0];   // Einträge der Waage zählen nicht als Durchsicht
 // Richtwerte natürlicher Milbenfall pro Tag
 const varroaFarbe = n => n == null ? '' : n < 5 ? 'gruen' : n < 10 ? 'gelb' : 'rot';
 // Jüngster Milbenfall aus Durchsicht oder Foto-Zählung
@@ -370,7 +370,7 @@ function zeigeVolk(v) {
     `<div class="karte"><b>${sName(v.standortId)}</b> · ${esc(v.beute)} · Status ${esc(v.status)}<br>
       Königin: ${koeniginPunkt(v.koeniginJahr) || '–'} · ${esc(v.rasse)}${v.koeniginHerkunft ? ' · ' + esc(v.koeniginHerkunft) : ''}${v.gezeichnet ? ' · gezeichnet' : ''}<br>
       Honigertrag gesamt: ${zahl(honig)} kg ${volkHinweise(v).map(([f, t]) => marke(t, f)).join(' ')}${v.notiz ? `<div class="leise">${esc(v.notiz)}</div>` : ''}</div>
-    ${kurvenHtml(id)}<h3>Durchsichten</h3>` +
+    ${kurvenHtml(id)}${swStockkarte(v)}<h3>Durchsichten</h3>` +
     tabelle(['Datum', 'Weisel', 'Zellen', 'Brut', 'Gassen', 'Futter', 'Sanftmut', 'Varroa/Tag', 'kg', 'Maßnahmen / Notiz', ''], ds.map(d => [
       fmtD(d.datum), marke(d.weisel, d.weisel === 'weisellos' ? 'rot' : d.weisel === 'unklar' ? 'gelb' : 'gruen'), esc(d.zellen), zahl(d.brutwaben), zahl(d.gassen), esc(d.futter), zahl(d.sanftmut),
       d.varroa == null ? '–' : marke(zahl(d.varroa), varroaFarbe(d.varroa)), zahl(d.gewicht), esc([d.massnahmen, d.notiz].filter(Boolean).join(' – ')),

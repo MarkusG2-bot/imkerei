@@ -13,13 +13,16 @@ function uhrStart(standortId) {
   if (db.einstellungen.uhr) return;
   db.einstellungen.uhr = { start: Date.now(), standortId: standortId ?? (db.standorte.length === 1 ? db.standorte[0].id : '') };
   speichern(); render();
+  swArbeit(db.einstellungen.uhr.standortId, true);       // Stockwaage: Stand in den Bearbeitungsmodus
 }
 function uhrStopp() {
   const u = db.einstellungen.uhr; if (!u) return;
+  swArbeit(u.standortId, false);                          // Stockwaage: Bearbeitungsmodus beenden
   zeitFormular(null, { standortId: u.standortId, start: lokal(u.start), ende: lokal(Date.now()), taetigkeit: 'Durchsicht' }, true);
 }
 function uhrVerwerfen() {
   if (!confirm('Laufende Zeitmessung verwerfen? Die Zeit wird nicht gebucht.')) return;
+  swArbeit(db.einstellungen.uhr?.standortId, false);       // Stockwaage: Bearbeitungsmodus beenden
   delete db.einstellungen.uhr; speichern(); render();
 }
 function uhrLeiste() {
