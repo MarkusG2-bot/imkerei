@@ -5,7 +5,7 @@
 // • Einstellungen: Varroa-Aufnahme (Serie/durchgehend), Schwarmvorhersage über den Summton (Empfindlichkeit, Dauerbetrieb)
 // • Mess-/Sendetakt (mit Grenze der Sendezeit), Waage kalibrieren mit Prüfgewicht, Firmware-Update
 // • Verlauf je Volk, Waagen-Karte in der Stockkarte, Ereignis → Stockführung, Push-Meldungen
-// • Arbeitszeit-Start → Bearbeitungsmodus am Stand; gemessene Zunahme im Trachtpotenzial
+// • Arbeitszeit-Start → Bearbeitungsmodus am Stand; NFC-Aufkleber am Stand → Arbeitszeit; gemessene Zunahme im Trachtpotenzial
 // • Konten mit Benutzername, Daten teilen (Einwilligungen je Stufe), Karte der Stände, Konto, Betreiber-Seite
 // Wird vor app.js geladen und nutzt dessen Hilfsfunktionen erst zur Laufzeit.
 // Server-Adresse und Anmeldung liegen bewusst NICHT in db (nicht in der JSON-Sicherung), sondern eigen im Browser.
@@ -17,7 +17,12 @@ let swStandAktiv = null, swStandDaten = null, swVolkAktiv = null, swVolkTage = 3
 const SW_ARTEN = { 1: 'Schwarm', 2: 'Bewegung', 3: 'Umsturz', 4: 'Räuberei-Verdacht', 5: 'Slave fehlt', 6: 'Akku', 7: 'Lastabwurf',
   8: 'Gewichtssprung (Eingriff?)', 9: 'Brut-Temperatur', 10: 'Volk still', 11: 'Diebstahl (Waage leer)', 12: 'Eingriff erkannt',
   13: 'Flugbeginn ungewöhnlich', 14: 'Tageszunahme ungewöhnlich', 15: 'Nachtabnahme ungewöhnlich', 16: 'Innentemperatur ungewöhnlich',
-  17: 'Summen ungewöhnlich', 18: 'Funk-Knoten fehlt', 19: 'Speicherkarte fast voll', 20: 'Schwarmstimmung (Summton)' };
+  17: 'Summen ungewöhnlich', 18: 'Funk-Knoten fehlt', 19: 'Speicherkarte fast voll', 20: 'Schwarmstimmung (Summton)',
+  21: 'Hornisse am Flugloch', 22: 'Wintertraube am Rand – Futter prüfen', 23: 'Futter wird knapp', 24: 'Flugbienen-Verlust',
+  25: 'Summen-Muster verändert', 26: 'Akku Rähmchen-Modul schwach', 27: 'Flugloch verengt', 28: 'Flugloch wieder geöffnet',
+  29: 'Flugloch-Schieber blockiert', 30: 'Räuberei (Kamera)', 31: 'Hitze im Stock', 32: 'Traube am Wabenende – Futter prüfen',
+  33: 'Gefüttert – Flugloch verengt', 34: 'Schieber-Position korrigiert', 35: 'Schieberstellung passt nicht zur Kamera',
+  36: 'Waage fehlt – Diebstahl?' };
 const SW_BLE = { dienst: '5f6d0001-5a3c-4b8e-9c1a-7c2d3e4f5a6b', info: '5f6d0002-5a3c-4b8e-9c1a-7c2d3e4f5a6b', anfrage: '5f6d0003-5a3c-4b8e-9c1a-7c2d3e4f5a6b',
   daten: '5f6d0004-5a3c-4b8e-9c1a-7c2d3e4f5a6b', status: '5f6d0005-5a3c-4b8e-9c1a-7c2d3e4f5a6b', best: '5f6d0006-5a3c-4b8e-9c1a-7c2d3e4f5a6b' };
 
@@ -59,13 +64,15 @@ function zeigeStockwaage() {
   if (swAnsicht === 'stand') return swStandSeite();
   if (swAnsicht === 'volk') return swVolkSeite();
   if (swAnsicht === 'kalib') return swKalibSeite();
+  if (swAnsicht === 'fuettern') return fuStandSeite();
   if (swAnsicht === 'teilen') return swTeilenSeite();
   if (swAnsicht === 'karte') return swKarteSeite();
   if (swAnsicht === 'konto') return swKontoSeite();
   if (swAnsicht === 'betrieb') return swBetriebSeite();
+  if (swAnsicht === 'meldungen') return swMeldungenSeite();
   swStopp();
   main().innerHTML = kopf('Stockwaage', `<button class="haupt" onclick="swEinrichtenStart()">＋ Waage einrichten</button>
-      <button onclick="swVerbindenStart()">📶 Stand verbinden</button><button onclick="swPush()">🔔 Meldungen</button>
+      <button onclick="swVerbindenStart()">📶 Stand verbinden</button><button onclick="swZus=null;swSeite('meldungen')">🔔 Meldungen</button>
       <button onclick="swSeite('teilen')">🔒 Daten teilen</button><button onclick="swSeite('karte')">🗺 Karte</button>
       <button onclick="swSeite('konto')">👤 Konto</button>${k.konto?.rolle === 'betreiber' ? `<button onclick="swSeite('betrieb')">🛠 Betrieb</button>` : ''}`) +
     (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
@@ -83,7 +90,8 @@ function zeigeStockwaage() {
 async function swLaden() {
   try {
     if (!swKonto().konto) { const k = swKonto(); swKontoSetzen({ ...k, konto: (await swAbruf('/api/app/ich')).konto }); }  // Anmeldung aus 1.1
-    swStaende = (await swAbruf('/api/app/staende')).staende; swFehler = '';
+    swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); swFehler = '';
+    swErntePruefen(swStaende);                                      // Trachtende → Aufgabe „Ernte prüfen“ (einmal je Stand und Trachtende)
   }
   catch (e) { swStaende = swStaende || []; swFehler = e.message; }
   if (ansicht === 'stockwaage') render();
@@ -156,12 +164,19 @@ function swEinrichtenSeite() {
       <h4 style="margin-top:16px">3 · Am Master</h4>
       <ol class="klein-t" style="padding-left:20px;line-height:1.6">
         <li><b>Taster 6 Sekunden halten</b>, bis die LED schnell blinkt.</li>
-        <li>Am Handy das WLAN <b>„Stockwaage-…“</b> wählen. Die Einrichtungsseite öffnet sich von selbst (sonst im Browser <b>192.168.4.1</b> aufrufen).</li>
+        <li>Am Handy das WLAN <b>„Stockwaage-Einrichtung“</b> (neue Waage) bzw. <b>„Stockwaage-…“</b> wählen. Die Einrichtungsseite öffnet sich von selbst (sonst im Browser <b>192.168.4.1</b> aufrufen).</li>
+        <li>Bei einer neuen Waage zuerst <b>Master</b> wählen (die Firmware ist für Master und Slave gleich).</li>
         <li>Dort eintragen: <b>Name und Passwort deines Handy-Hotspots</b>, den <b>Kopplungscode</b> oben und – falls leer – die Server-Adresse <b>${esc(swKonto().server)}</b>. Speichern.</li>
         <li>Das WLAN „Stockwaage-…“ verlassen und den <b>Handy-Hotspot einschalten</b>.<br>
           <span class="leise">iPhone: Einstellungen → Persönlicher Hotspot → „Zugriff für andere erlauben“ und <b>„Kompatibilität maximieren“</b> ein.
           Android: Hotspot-Band <b>2,4 GHz</b>.</span></li>
         <li>Zurück in diese App – sie meldet sich, sobald die Waage verbunden ist (1–3 min).</li>
+      </ol>
+      <h4 style="margin-top:16px">Weitere Waagen (Slaves)</h4>
+      <ol class="klein-t" style="padding-left:20px;line-height:1.6">
+        <li>Am Slave <b>Taster 6 Sekunden</b> → WLAN <b>„Stockwaage-Einrichtung“</b> → <b>Slave</b> wählen.</li>
+        <li>Am Master <b>Taster 3 Sekunden</b> (Anlernmodus), dann am Handy <b>„Verbindung zum Master prüfen“</b>. Nach bis zu 60 s zeigt die Seite die Waagen-Nummer – oder dass kein Master gefunden wurde.</li>
+        <li>Hier unter dem Stand die neue Waagen-Nummer dem Volk zuordnen.</li>
       </ol>
       <p class="klein-t">⏳ Warte auf die Waage … <span class="leise">(prüft alle 10 s)</span></p>
       ${swFehler ? `<p class="rot-t">${esc(swFehler)}</p>` : ''}</div>`);
@@ -169,7 +184,7 @@ function swEinrichtenSeite() {
 }
 async function swEinrichtenPruefen() {
   try {
-    const st = (await swAbruf('/api/app/staende')).staende;
+    const st = swBleMerken((await swAbruf('/api/app/staende')).staende);
     // neu gekoppelt: Gerät, das seit dem Code-Holen angelegt bzw. neu gekoppelt wurde
     const neu = st.find(s => s.angelegt >= swEin.start - 1000 && (s.name || '') === swEin.name)
       || (await Promise.all(st.map(async s => ({ s, n: await swAbruf(`/api/app/stand/${s.stand}/neu?seit=${swEin.start}`) }))))
@@ -183,7 +198,7 @@ async function swEinrichtenPruefen() {
 
 // ---------- Stand verbinden (Handy-Hotspot oder Bluetooth) ----------
 async function swVerbindenStart(stand) {
-  if (!swStaende) try { swStaende = (await swAbruf('/api/app/staende')).staende; } catch (e) { swFehler = e.message; return render(); }
+  if (!swStaende) try { swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); } catch (e) { swFehler = e.message; return render(); }
   if (!swStaende.length) { swFehler = 'Noch keine Waage eingerichtet.'; return render(); }
   swVerb = { stand: stand || (swStaende.length === 1 ? swStaende[0].stand : null), start: Date.now(), uploads: 0, neu: 0, zuletzt: null, ble: '' };
   swAnsicht = 'verbinden'; render();
@@ -233,6 +248,37 @@ async function swVerbindenPruefen() {
 const swCrcTafel = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function swCrc32(bytes) { let c = 0xFFFFFFFF; for (const b of bytes) c = swCrcTafel[(c ^ b) & 0xFF] ^ (c >>> 8); return ((c ^ 0xFFFFFFFF) >>> 0); }
 
+// ---------- Bluetooth-Schlüssel (Stockwaage firmware/src/ble_logik.h) ----------
+// Der Server gibt je Stand die gültigen Schlüssel (aktuelle und, 7 Tage lang, die alte Generation). Sie liegen nur am
+// Handy (localStorage 'sw-ble'), nicht in der JSON-Sicherung; fehlen sie, holt die App sie beim nächsten Laden neu.
+function swBleMerken(staende) {
+  try {
+    const alt = JSON.parse(localStorage.getItem('sw-ble') || '{}');
+    for (const s of staende || []) if (s.ble) alt[s.stand] = s.ble;
+    localStorage.setItem('sw-ble', JSON.stringify(alt));
+  } catch {}
+  return staende;
+}
+function swBleSchluesselHex(stand, gen) {
+  try { return (JSON.parse(localStorage.getItem('sw-ble') || '{}')[stand] || []).find(x => x.gen === gen)?.schluessel || null; }
+  catch { return null; }
+}
+const swHex = h => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+// Paket [nr 2][Daten AES-128-CTR][Code 8] prüfen und entschlüsseln; null bei falschem Code
+async function swBleAuspacken(schluesselHex, start, paket) {
+  if (paket.length < 10) return null;
+  const roh = swHex(schluesselHex), nr = paket[0] << 8 | paket[1], l = paket.length - 10;
+  const iv = new Uint8Array(16);
+  new DataView(iv.buffer).setUint32(0, start >>> 0);
+  iv[4] = nr >> 8; iv[5] = nr & 255;
+  const chiffre = paket.slice(2, 2 + l);
+  const hk = await crypto.subtle.importKey('raw', roh, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const code = new Uint8Array(await crypto.subtle.sign('HMAC', hk, new Uint8Array([...iv, ...chiffre]))).slice(0, 8);
+  if (code.some((b, i) => b !== paket[2 + l + i])) return null;
+  const ak = await crypto.subtle.importKey('raw', roh, 'AES-CTR', false, ['decrypt']);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CTR', counter: iv, length: 64 }, ak, chiffre));
+}
+
 // Rohdaten per Bluetooth vom Master holen und zum Server weiterreichen; der Server unterschreibt, der Master prüft
 async function swBluetooth(stand) {
   const melde = t => { swVerb.ble = t; if (swAnsicht === 'verbinden') render(); };
@@ -246,12 +292,22 @@ async function swBluetooth(stand) {
     const text = async ch => new TextDecoder().decode(await ch.readValue());
     const info = Object.fromEntries((await text(c.info)).split(';').map(x => x.split('=')));
     if (info.stand !== stand) throw new Error(`Das ist Stand ${info.stand}, nicht ${stand}.`);
-    let teile = [], ende = null, ok = null;
+    // verschlüsselt? (Master ab Firmware mit Bluetooth-Schlüssel meldet gen und start)
+    const gen = Number(info.gen) || 0, start = parseInt(info.start || '0', 16);
+    const key = gen ? swBleSchluesselHex(stand, gen) : null;
+    if (gen && !key) throw new Error('Der Bluetooth-Schlüssel fehlt am Handy – App einmal mit Internet öffnen (Stände laden), dann nochmal.');
+    if (!gen) melde('⚠ Bluetooth ohne Schutz – Firmware des Masters aktualisieren. Verbinde …');
+    const klar = async u => key ? swBleAuspacken(key, start, u) : u;
+    let teile = [], ende = null, ok = null, gestoert = false;
     c.daten.addEventListener('characteristicvaluechanged', e => teile.push(new Uint8Array(e.target.value.buffer.slice(0))));
-    c.status.addEventListener('characteristicvaluechanged', e => { const t = new TextDecoder().decode(e.target.value); if (t.startsWith('ENDE')) ende = t; else ok = t; });
+    c.status.addEventListener('characteristicvaluechanged', async e => {
+      const k = await klar(new Uint8Array(e.target.value.buffer.slice(0)));
+      if (!k) { gestoert = true; ende = 'ENDE;-1;0'; return; }
+      const t = new TextDecoder().decode(k); if (t.startsWith('ENDE')) ende = t; else ok = t;
+    });
     await c.daten.startNotifications(); await c.status.startNotifications();
     const warte = async (f, ms) => { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 50)); return f(); };
-    let gesamt = 0;
+    let gesamt = 0, fehlversuche = 0;
     for (const datei of ['roh', 'sensor']) {
       let pos = Number(info[datei + 'pos']) || 0;
       const groesse = Number(info[datei]) || 0;
@@ -260,8 +316,11 @@ async function swBluetooth(stand) {
         await c.anfrage.writeValue(new TextEncoder().encode(`${datei};${pos};8192`));
         if (!await warte(() => ende, 30000)) throw new Error('Master antwortet nicht');
         const [, laenge, crc] = ende.split(';');
-        const stueck = new Uint8Array(teile.reduce((n, t) => n + t.length, 0));
-        let o = 0; for (const t of teile) { stueck.set(t, o); o += t.length; }
+        const offen = [];
+        for (const t of teile) { const k = await klar(t); if (!k) gestoert = true; else offen.push(k); }
+        if (gestoert) { gestoert = false; if (++fehlversuche > 3) throw new Error('Übertragung mehrmals gestört (falscher Schlüssel?)'); melde('Übertragung gestört – nochmal …'); continue; }
+        const stueck = new Uint8Array(offen.reduce((n, t) => n + t.length, 0));
+        let o = 0; for (const t of offen) { stueck.set(t, o); o += t.length; }
         if (stueck.length !== Number(laenge) || swCrc32(stueck).toString(16).padStart(8, '0').toUpperCase() !== crc.toUpperCase()) continue;   // nochmal
         if (!stueck.length) break;
         const j = await swAbruf(`/api/app/stand/${stand}/rohdaten?datei=${datei}&von=${pos}&crc=${crc}`, { method: 'POST', body: stueck, kopf: { 'Content-Type': 'text/csv' } });
@@ -286,6 +345,11 @@ async function swStandLaden() {
     swStandDaten.befehle = (await swAbruf(`/api/app/stand/${swStandAktiv}/befehle`)).befehle;
     swStandDaten.fw = await swAbruf(`/api/app/stand/${swStandAktiv}/firmware`).catch(() => null);
     swStandDaten.pakete = (await swAbruf('/api/app/firmware').catch(() => ({ firmware: [] }))).firmware;
+    swStandDaten.flugzaehler = (await swAbruf(`/api/app/stand/${swStandAktiv}/erweiterungen?volk=1`).catch(() => ({}))).flugzaehler || [];
+    swStandDaten.tracht = await swAbruf(`/api/app/stand/${swStandAktiv}/tracht?tage=7`).catch(() => null);      // älterer Server: keine
+    swStandDaten.akkus = await swAbruf(`/api/app/stand/${swStandAktiv}/akkus`).catch(() => null);
+    swStandDaten.lage = (await swAbruf(`/api/app/stand/${swStandAktiv}/lage`).catch(() => ({}))).waagen || [];
+    if (swStandDaten.tracht) swErnteAufgabe(swStandAktiv, swStandDaten.tracht.ernte, (swStaende || []).find(x => x.stand === swStandAktiv)?.name || 'Stand ' + swStandAktiv);
     swFehler = '';
   }
   catch (e) { swFehler = e.message; swStandDaten = swStandDaten || { voelker: [], ereignisse: [], befehle: [] }; }
@@ -299,22 +363,27 @@ function swStandSeite() {
   const optVolk = nr => `<select onchange="swZuordnen('${s.stand}',${nr},this.value)"><option value="">– Volk wählen –</option>${db.voelker.filter(v => v.status !== 'aufgelöst')
     .map(v => `<option value="${v.id}" ${v.waage?.stand === s.stand && v.waage?.nr === nr ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>`;
   const offen = (d.befehle || []).filter(x => !x.erledigt);
+  const abgelaufen = (d.befehle || []).filter(x => x.erledigt && (x.text || '').includes('abgelaufen'));
   main().innerHTML = kopf(swName(s), `${swZurueck()}<button onclick="swVerbindenStart('${s.stand}')">📶 Verbinden</button>
       <button onclick="swBefehl('bearbeitung',0,120,'Stand 2 h in Bearbeitung')">🛠 Bearbeitung 2 h</button>
-      <button onclick="swBefehlFragen()">⚙ Befehl</button>`) +
+      <button onclick="fuStart('${s.stand}')">🍯 Füttern</button><button onclick="swBefehlFragen()">⚙ Befehl</button>`) +
     (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
     `<div class="raster">
       <div class="karte kachel"><b>${b?.gesamt_kg != null ? zahl(b.gesamt_kg, 1) + ' kg' : '–'}</b>Stand gesamt${b ? ' · ' + swVor(b.zeit) : ''}</div>
       <div class="karte kachel"><b>${b?.median_heute_kg != null ? (b.median_heute_kg > 0 ? '+' : '') + zahl(b.median_heute_kg, 2) + ' kg' : '–'}</b>heute je Volk (Mittel)${b?.voelker_im_flug != null ? ` · ${b.voelker_im_flug} fliegen` : ''}</div>
       <div class="karte kachel"><b>${b?.aussen_temp_c != null ? zahl(b.aussen_temp_c, 1) + ' °C' : '–'}</b>außen${b?.aussen_feuchte_pct != null ? ` · ${b.aussen_feuchte_pct} %` : ''}</div>
       <div class="karte kachel"><b>${b?.akku_v != null ? zahl(b.akku_v, 2) + ' V' : '–'}</b>Akku${b?.status?.lastabwurf ? ' · <span class="rot-t">Lastabwurf</span>' : ''}${b?.status?.bearbeitung ? ' · in Bearbeitung' : ''}</div>
-      ${w ? `<div class="karte kachel"><b>${w.wind_ms != null ? zahl(w.wind_ms, 1) + ' m/s' : '–'}</b>Wind${w.richtung_grad != null ? ' aus ' + w.richtung_grad + '°' : ''} · Regen heute ${zahl(w.regen_heute_mm ?? 0, 1)} mm</div>` : ''}
+      ${w ? `<div class="karte kachel"><b>${w.wind_ms != null ? zahl(w.wind_ms, 1) + ' m/s' : '–'}</b>Wind${w.richtung_grad != null ? ' aus ' + w.richtung_grad + '°' : ''}${w.boe_ms != null ? ', Böe ' + zahl(w.boe_ms, 1) : ''} · Regen heute ${zahl(w.regen_heute_mm ?? 0, 1)} mm${swLuftdruck(w, d.wetter_vor3h)}</div>` : ''}
     </div>
     <div class="karte" style="margin-top:12px"><label>Standplatz in der App
       <select onchange="swPlatz('${s.stand}',this.value)"><option value="">– keiner –</option>${db.standorte.map(o => `<option value="${o.id}" ${platz?.id === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>
       <div class="klein-t leise">Mit Standplatz: Arbeitszeit-Start schaltet den Bearbeitungsmodus ein; das Trachtpotenzial zeigt die gemessene Zunahme.</div></div>
+    ${swNfcKarte(s.stand)}
+    ${swFlugzaehlerKarte(d)}
     ${swTaktKarte(d)}
     ${swEinstellKarte(d)}
+    ${swAkkuKarte(d)}
+    ${swLageKarte(d)}
     <h3>Völker</h3>` +
     tabelle(['Waage', 'Volk', 'Gewicht', 'Heute', 'Innen', 'Varroa', 'Messung', ''], d.voelker.map(v => [
       '<b>' + v.volk + '</b>' + (v.volk === 1 ? ' <span class="leise klein-t">Master</span>' : ''), optVolk(v.volk),
@@ -323,15 +392,26 @@ function swStandSeite() {
       v.t_innen != null ? zahl(v.t_innen, 1) + ' °C' : '–', v.bienen ? zahl(v.varroa / v.bienen * 1000, 1) + ' ‰' : '–',
       swVor(v.zeit * 1000), `<button class="klein" title="Verlauf" onclick="swVolkOeffnen('${s.stand}',${v.volk})">📈</button>
         <button class="klein" title="Kalibrieren" onclick="swKalibStart('${s.stand}',${v.volk})">⚖</button>`])) +
+    (d.tracht ? '<h3>Tracht</h3><div class="raster">' + swTrachtKarten(d) + '</div>' : '') +
     '<h3>Ereignisse (3 Tage)</h3>' + swEreignisTabelle(d.ereignisse, s.stand) +
     (offen.length ? '<h3>Offene Befehle</h3>' + tabelle(['Seit', 'Befehl', 'Weg'], offen.map(x => [swVor(x.angelegt), esc(x.text || swBefehlText(x)), x.downlink ? 'Funk' : x.abgeholt ? 'abgeholt' : 'wartet auf Abgleich'])) : '') +
+    (abgelaufen.length ? '<h3>Abgelaufen (7 Tage nicht ausgeführt)</h3><p class="klein-t leise">Die Waage hat den Befehl eine Woche lang nicht bestätigt – ist sie abgebaut, ohne Strom oder außer Funkreichweite? Bei Bedarf neu stellen.</p>' +
+      tabelle(['Gestellt', 'Befehl'], abgelaufen.map(x => [swVor(x.angelegt), esc((x.text || swBefehlText(x)).replace(' (abgelaufen – Waage nicht erreicht)', ''))])) : '') +
     swFirmwareKarte(d) +
     (d.status ? `<p class="leise klein-t">Gerät: Firmware ${esc(d.status.firmware)} · SF ${d.status.spreizfaktor ?? '–'} · SD ${d.status.sd_belegt_pct ?? '–'} % · Handy-Abgleich vor ${d.status.tage_seit_abgleich ?? '–'} Tagen</p>` : '');
+}
+// Luftdruck mit Tendenz der letzten 3 Stunden (Wetter-Einheit mit BME280): ↗ steigend ab +1,5 hPa, ↘ fallend ab −1,5 hPa
+function swLuftdruck(w, vor3h) {
+  if (w.luftdruck_hpa == null) return '';
+  const d = vor3h?.luftdruck_hpa != null ? w.luftdruck_hpa - vor3h.luftdruck_hpa : null;
+  const pfeil = d == null ? '' : d >= 1.5 ? ' ↗ steigend' : d <= -1.5 ? ' ↘ fallend' : ' → gleichbleibend';
+  return ` · ${zahl(w.luftdruck_hpa)} hPa${pfeil}`;
 }
 const swBefehlText = x => ({ 1: x.wert ? `Bearbeitung ${x.wert} min` : 'Bearbeitung beenden', 2: x.wert ? `Messtakt ${x.wert} min` : 'Messtakt automatisch', 3: ['Kameras aus', 'Kameras an', 'Kameras automatisch'][x.wert],
   4: 'Tara', 5: 'Schwelle', 6: 'Neustart', 7: x.wert ? `Sendetakt ${x.wert} min` : 'Sendetakt automatisch',
   8: x.wert ? `Kalibrieren mit ${zahl(x.wert / 1000, 2)} kg` : 'Kalibrieren: Bezug',
-  9: x.wert ? 'Varroa: durchgehend bei Flugbetrieb' : 'Varroa: Serie alle 5 min', 10: `Update starten (Paket ${x.wert})` })[x.art] + (x.volk && x.art !== 5 ? ` (Volk ${x.volk})` : '');
+  9: x.wert ? 'Varroa: durchgehend bei Flugbetrieb' : 'Varroa: Serie alle 5 min', 10: `Update starten (Paket ${x.wert})`,
+  14: x.volk ? 'Fütterung erwartet' : 'Gefüttert – Schieber verengen' })[x.art] + (x.volk && x.art !== 5 && x.art !== 14 ? ` (Volk ${x.volk})` : '');
 
 // ---------- Kameras und Schwarmvorhersage ----------
 // Varroa-Kamera: Serie alle 5 min oder bei Flugbetrieb durchgehend (Befehl VARROA, ganzer Stand).
@@ -344,27 +424,31 @@ function swLetzterWert(d, art, volk, standard) {     // zuletzt eingestellter We
   return b ? { wert: b.wert, offen: !b.erledigt } : { wert: standard, offen: false };
 }
 function swEinstellKarte(d) {
-  const va = swLetzterWert(d, 9, 0, 0), ton = swLetzterWert(d, 5, 7, 150), wache = swLetzterWert(d, 5, 8, 12);
-  const offen = [va, ton, wache].some(x => x.offen) ? ' <span class="leise klein-t">(wartet auf den Master)</span>' : '';
+  const va = swLetzterWert(d, 9, 0, 0), ton = swLetzterWert(d, 5, 7, 150), wache = swLetzterWert(d, 5, 8, 12), fu = swLetzterWert(d, 5, 9, 1);
+  const offen = [va, ton, wache, fu].some(x => x.offen) ? ' <span class="leise klein-t">(wartet auf den Master)</span>' : '';
   return `<div class="karte" style="margin-top:12px"><h4>🎥 Kameras und Schwarmvorhersage${offen}</h4>
     <div class="zeile"><label>Varroa-Aufnahme<select id="sw-varroa">
         <option value="0" ${va.wert === 0 ? 'selected' : ''}>Serie alle 5 min</option>
         <option value="1" ${va.wert === 1 ? 'selected' : ''}>durchgehend bei Flugbetrieb</option></select></label>
       <label>Schwarmvorhersage (Summton)<select id="sw-ton">${SW_TON.map(([w, t]) => `<option value="${w}" ${w === ton.wert ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label>danach Dauerbetrieb<select id="sw-wache">${[6, 12, 24].map(h => `<option value="${h}" ${h === wache.wert ? 'selected' : ''}>${h} Stunden</option>`).join('')}</select></label>
+      <label>Flugloch nach dem Füttern verengt<select id="sw-fuetter">${[1, 2, 3].map(t => `<option value="${t}" ${t === fu.wert ? 'selected' : ''}>noch ${t} ${t === 1 ? 'Tag' : 'Tage'} danach</option>`).join('')}</select></label>
       <button onclick="swEinstellSetzen()">Übernehmen</button></div>
     <div class="klein-t leise">Durchgehend: die Fluglochkamera nimmt Serie an Serie auf, solange geflogen wird (genauere Varroa-Zahlen,
       mehr Strom, mehr Speicher). Schwarmvorhersage: steigt der Summton eines Volks mehrere Runden deutlich über seinen Normalwert,
       kommt die Meldung „Schwarmstimmung“ und das Volk wird so lange jede Minute gewogen, die Fluglochkamera läuft durchgehend.
       Das Volk lernt seinen Normalwert in den ersten Tagen. Der Summton ist ein Hinweis, keine sichere Vorhersage.
-      Kameras: Ereignis-Clips bleiben am Pi, bis sie hochgeladen sind; ab 80 % voller Speicherkarte kommt eine Meldung.</div></div>`;
+      Kameras: Ereignis-Clips bleiben am Pi, bis sie hochgeladen sind; ab 80 % voller Speicherkarte kommt eine Meldung.
+      Füttern: Sieht die Waage Juli–Oktober oder März/April 2 kg oder mehr dazu, verengt der Flugloch-Schieber auf 4 Gassen –
+      am Fütterungstag und so viele Tage danach (gegen Räuberei). Hitze und Stau öffnen trotzdem.</div></div>`;
 }
 async function swEinstellSetzen() {
-  const va = Number($('#sw-varroa').value), ton = Number($('#sw-ton').value), wache = Number($('#sw-wache').value), d = swStandDaten;
+  const va = Number($('#sw-varroa').value), ton = Number($('#sw-ton').value), wache = Number($('#sw-wache').value), fu = Number($('#sw-fuetter').value), d = swStandDaten;
   const neu = [];
   if (va !== swLetzterWert(d, 9, 0, 0).wert) neu.push({ art: 'varroa', volk: 0, wert: va, text: va ? 'Varroa durchgehend bei Flugbetrieb' : 'Varroa Serie alle 5 min' });
   if (ton !== swLetzterWert(d, 5, 7, 150).wert) neu.push({ art: 'schwelle', volk: 7, wert: ton, text: ton ? `Schwarmvorhersage ${SW_TON.find(x => x[0] === ton)[1]}` : 'Schwarmvorhersage aus' });
   if (wache !== swLetzterWert(d, 5, 8, 12).wert) neu.push({ art: 'schwelle', volk: 8, wert: wache, text: `Dauerbetrieb ${wache} h` });
+  if (fu !== swLetzterWert(d, 5, 9, 1).wert) neu.push({ art: 'schwelle', volk: 9, wert: fu, text: `Flugloch nach dem Füttern noch ${fu} ${fu === 1 ? 'Tag' : 'Tage'} verengt` });
   if (!neu.length) { alert('Nichts geändert.'); return; }
   if (!confirm(neu.map(x => x.text).join('\n') + '\n\nÜbernehmen?')) return;
   try {
@@ -579,7 +663,8 @@ function swEreignisTabelle(liste, stand) {
     const video = clips.length ? clips.map(c => `<button class="klein" title="Video ${c.quelle === 'flugloch' ? 'vom Flugloch' : 'der Übersichtskamera'}" onclick="swVideo('${esc(c.url)}','${esc(titel)}',${e.zeit},'${c.quelle || ''}')">▶ ${c.quelle === 'flugloch' ? 'Flugloch' : 'Übersicht'}</button> `).join('')
       : e.clip_erwartet ? '<span class="leise klein-t" title="Die Kameras laden beim nächsten Handy-Abgleich am Stand hoch">🎥 beim nächsten Besuch</span> ' : '';
     return [new Date(e.zeit * 1000).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
-      e.volk ? (v ? esc(v.name) : e.volk) : 'Stand', (e.alarm ? '🚨 ' : '') + esc(SW_ARTEN[e.art] || e.artname || e.art) + (e.wert === 0 && !e.alarm ? ' <span class="leise">– vorbei</span>' : ''),
+      e.volk ? (v ? esc(v.name) : e.volk) : 'Stand', (e.alarm ? '🚨 ' : '') + esc(SW_ARTEN[e.art] || e.artname || e.art) + (e.wert === 0 && !e.alarm ? ' <span class="leise">– vorbei</span>' : '')
+        + (e.lat != null && e.lon != null ? ` <a href="https://www.openstreetmap.org/?mlat=${e.lat}&mlon=${e.lon}#map=17/${e.lat}/${e.lon}" target="_blank" rel="noopener" title="Position des Masters beim Alarm (GNSS des Modems)">📍 Karte</a>` : ''),
       video + (v && !e.uebernommen ? `<button class="klein" onclick="swUebernehmen(${e.id},'${stand}')">→ Stockführung</button>` : e.uebernommen ? '<span class="leise klein-t">übernommen</span>' : '')];
   }));
 }
@@ -682,8 +767,9 @@ async function swVolkLaden() {
       swAbruf(`/api/app/stand/${st}/tageswerte?volk=${nr}&von=${swDatum(von).slice(0, 10)}&bis=${swDatum(jetzt).slice(0, 10)}`),
       swAbruf(`/api/app/stand/${st}/ereignisse?volk=${nr}&seit=${von}`),
       swAbruf(`/api/app/stand/${st}/clips?volk=${nr}&seit=${von}`).catch(() => ({ clips: [] }))]);
-    swVolkDaten = { werte: v.werte, tage: t.tage, ereignisse: e.ereignisse, clips: c.clips }; swFehler = '';
-  } catch (e) { swFehler = e.message; swVolkDaten = { werte: [], tage: [], ereignisse: [], clips: [] }; }
+    const x = await swAbruf(`/api/app/stand/${st}/erweiterungen?volk=${nr}`).catch(() => ({}));   // älterer Server: keine
+    swVolkDaten = { werte: v.werte, tage: t.tage, ereignisse: e.ereignisse, clips: c.clips, erw: x }; swFehler = '';
+  } catch (e) { swFehler = e.message; swVolkDaten = { werte: [], tage: [], ereignisse: [], clips: [], erw: {} }; }
   if (ansicht === 'stockwaage' && swAnsicht === 'volk') render();
 }
 function swVolkSeite() {
@@ -701,11 +787,127 @@ function swVolkSeite() {
       ${swKurve('Innentemperatur', p('t_innen'), '#c0392b', '°C')}${swKurve('Brut-Temperatur', p('t_brut'), '#e67e22', '°C')}
       ${swKurve('Summen', p('summ_hz'), '#2563eb', 'Hz')}
       ${kurve('Milben je 1000 Bienen', d.tage.map(t => ({ datum: t.tag, wert: t.milben_je_1000 })), '#8e2318', '‰', true)}</div>
+    ${swErweiterungen(d.erw || {})}
     <h3>Ereignisse</h3>${swEreignisTabelle(d.ereignisse, swStandAktiv)}` +
     (d.clips?.length ? '<h3>Videos der Übersichtskamera</h3>' + tabelle(['Zeit', 'Ereignis', ''], d.clips.map(c => [
       new Date((c.ereignis_zeit || c.zeit) * 1000).toLocaleString('de-AT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
       esc(SW_ARTEN[c.ereignis_art] || 'Aufnahme') + ` <span class="leise klein-t">${c.quelle === 'flugloch' ? 'Flugloch' : 'Übersicht'}</span>`,
       `<button class="klein" onclick="swVideo('${esc(c.url)}','${esc(SW_ARTEN[c.ereignis_art] || 'Aufnahme')} Volk ${swVolkAktiv}',${c.ereignis_zeit || c.zeit},'${c.quelle || ''}')">▶ Video</button>`])) : '');
+}
+
+// ---------- Sensor-Erweiterungen je Volk (Server: lib/erweiterungen.js) ----------
+// Jede Karte erscheint nur, wenn es dazu Daten gibt – ohne Sensor fehlt sie einfach.
+function swErweiterungen(x) {
+  const k = [];
+  const tagKurz = t => t.slice(8, 10) + '.' + t.slice(5, 7) + '.';
+  if (x.lage) k.push(swLageVolk(x.lage, swStandAktiv, swVolkAktiv));
+  if (x.traube) {
+    const j = x.traube.jetzt, n = j.temps.length;
+    const balken = j.temps.map((t, i) => `<div style="flex:1;text-align:center;padding:6px 0;border-radius:6px;background:${t == null ? '#ddd'
+      : `hsl(${Math.max(0, 220 - Math.max(0, t) * 6)},70%,${j.lage === i + 1 ? 45 : 70}%)`};color:${j.lage === i + 1 ? '#fff' : '#222'}">
+      <b>${t == null ? '–' : zahl(t, 1)}</b><div class="klein-t">${i + 1}</div></div>`).join('');
+    k.push(`<div class="karte"><h4>🌡 Wintertraube (${n} Fühler)</h4><div style="display:flex;gap:3px">${balken}</div>
+      <div class="klein-t" style="margin-top:6px">${j.lage ? `Traube bei Fühler ${j.lage} (${zahl(j.maxC, 1)} °C)` + (j.amRand ? ' – <span class="rot-t">am Rand: Futter auf dieser Seite prüfen</span>' : '') : 'Keine Traube erkannt (alle Fühler unter 15 °C).'}
+      · ${swVor(j.zeit * 1000)}</div>
+      <div class="klein-t leise">Lage je Tag: ${x.traube.tage.slice(-7).map(t => `${tagKurz(t.tag)} ${t.lage ?? '–'}${t.amRand ? '!' : ''}`).join(' · ')}</div></div>`);
+  }
+  if (x.co2) {
+    const j = x.co2.jetzt;
+    k.push(kurve(`CO₂ im Stock – jetzt ${j.ppm} ppm`, x.co2.tage.map(t => ({ datum: t.tag, wert: t.mittel })), '#556b2f', 'ppm'));
+  }
+  if (x.flug) {
+    const t = x.flug.tage, l = t[t.length - 1];
+    k.push(`<div class="karte"><h4>🐝 Flugloch-Zähler</h4>
+      <div class="klein-t">Heute ${l.hinein} hinein · ${l.hinaus} hinaus · Bilanz ${l.bilanz > 0 ? '+' : ''}${l.bilanz}</div>
+      ${l.gassen ? `<div class="klein-t leise">${l.gassen} Gassen · ${l.doppelt || 0} × zwei Bienen erkannt${l.sonne != null ? ` · Sonne im Sensor ${l.sonne} %` : ''}</div>` : ''}
+      ${l.gestoerteGassen ? `<div class="klein-t rot-t">${l.gestoerteGassen} ${l.gestoerteGassen === 1 ? 'Gasse' : 'Gassen'} gestört – reinigen (Biene sitzt, Schmutz, Propolis)</div>`
+        : l.gestoert ? '<div class="klein-t rot-t">Lichtschranke gestört (verschmutzt?)</div>' : ''}
+      ${tabelle(['Tag', 'hinein', 'hinaus', 'Bilanz'], t.slice(-7).reverse().map(x => [tagKurz(x.tag), x.hinein, x.hinaus,
+        marke((x.bilanz > 0 ? '+' : '') + x.bilanz, x.hinaus >= 500 && x.hinaus - x.hinein > 0.3 * x.hinaus ? 'rot' : '')]))}</div>`);
+  }
+  if (x.flugloch) {
+    const f = x.flugloch, eng = [1, 2, 3, 5].includes(f.zustand);   // 4 = blockiert
+    k.push(`<div class="karte"><h4>🚪 Flugloch-Schieber</h4>
+      <div class="klein-t">${f.zustand === 4 ? '<b class="rot-t">Schieber blockiert</b> – bitte nachsehen (Hindernis, Propolis)'
+        : eng ? `<b class="rot-t">Verengt (${esc(f.zustandText || '')})</b> auf ${f.offen} von ${f.gassen} Gassen (${swVor(f.seit * 1000)})`
+        : `Ganz offen (${f.offen} Gassen)${f.aufGrund ? ` · zuletzt geöffnet: ${esc(f.aufGrund)}` : ''}`}</div>
+      ${f.kameraProzent != null ? `<div class="klein-t leise">Kamera sieht den Schieber zu ${f.kameraProzent} % geschlossen</div>` : ''}
+      ${f.korrekturen ? `<div class="klein-t leise">Position ${f.korrekturen}× neu abgeglichen</div>` : ''}
+      <div class="zeile" style="margin-top:6px">${eng || f.zustand === 4 ? '<button onclick="swFlugloch(false)">Wieder öffnen</button>' : ''}
+        ${!eng ? '<button class="klein" onclick="swFlugloch(true)">Jetzt verengen</button>' : ''}
+        ${f.zustand !== 5 ? '<button class="klein" onclick="swFlugloch(true, true)">Gefüttert</button>' : ''}</div>
+      <div class="klein-t leise">Bei Räuberei oder Hornissen verengt der Zähler selbst. „Wieder öffnen“ hält ihn 24 Stunden davon ab
+        (Hornissen ausgenommen). Der Befehl kommt mit der nächsten Runde an (bis 15 min).</div></div>`);
+  }
+  if (x.hornisse) {
+    const mit = x.hornisse.tage.filter(t => t.max > 0);
+    k.push(`<div class="karte"><h4>🐝 Hornissen am Flugloch</h4><div class="klein-t">${mit.length ? `An ${mit.length} der letzten ${x.hornisse.tage.length} Tage gesehen, zuletzt ${tagKurz(mit[mit.length - 1].tag)} (bis ${mit[mit.length - 1].max} gleichzeitig).`
+      : 'In den letzten 14 Tagen keine gesehen.'}</div></div>`);
+  }
+  if (x.futter) {
+    const f = x.futter;
+    k.push(`<div class="karte"><h4>🍯 Futter (Winter)</h4>
+      <div class="klein-t">Verbrauch ${f.verbrauch_g_tag} g/Tag · Gewicht nachts ${zahl(f.aktuell_kg, 1)} kg${f.reicht_tage != null
+        ? ` · reicht etwa <b class="${f.reicht_tage < 21 ? 'rot-t' : ''}">${Math.max(0, f.reicht_tage)} Tage (bis ${fmtD(f.reicht_bis)})</b>` : ''}</div>
+      <div class="zeile" style="margin-top:6px"><label style="flex:1">Gewicht ohne Futter (Beute + Volk + leere Waben), kg
+        <input id="sw-mindest" type="number" step="0.5" min="0" value="${f.mindest_kg ?? ''}" placeholder="z. B. 22"></label>
+        <button onclick="swMindest()">Speichern</button></div>
+      <div class="klein-t leise">Mit diesem Wert rechnet die App, wie lange das Futter reicht, und meldet, wenn es unter 3 Wochen sind.</div></div>`);
+  }
+  if (x.modul) {
+    const m = x.modul;
+    k.push(`<div class="karte"><h4>🖼 ${m.raehmchen ? 'Rähmchen-Modul' : 'Stockmodul'} (${m.funk ? 'Funk' : 'Kabel'})${m.rev ? ' · Rev ' + String.fromCharCode(64 + m.rev) : ''}</h4>
+      <div class="klein-t">${esc(m.stufe)}${m.plaetze ? ` · ${m.plaetze} Fühler` : ''} · ${swVor(m.zeit * 1000)}</div>
+      ${m.funk ? `<div class="klein-t">Akku <b class="${m.akkuProzent != null && m.akkuProzent < 15 ? 'rot-t' : ''}">${m.akkuMv != null ? zahl(m.akkuMv / 1000, 2) + ' V (etwa ' + m.akkuProzent + ' %)' : '–'}</b>${m.rssi != null ? ` · Funk ${m.rssi} dBm${m.rssi < -85 ? ' <span class="rot-t">(schwach)</span>' : ''}` : ''}</div>` : ''}
+      <div class="klein-t leise">Firmware ${m.fw || '?'}</div></div>`);
+  }
+  if (x.raehmchen) {
+    const j = x.raehmchen.jetzt, n = j.temps.length;
+    const balken = j.temps.map((t, i) => `<div style="flex:1;text-align:center;padding:6px 0;border-radius:6px;background:${t == null ? '#ddd'
+      : `hsl(${Math.max(0, 220 - Math.max(0, t) * 6)},70%,${j.warm === i + 1 ? 45 : 70}%)`};color:${j.warm === i + 1 ? '#fff' : '#222'}">
+      <b>${t == null ? '–' : zahl(t, 1)}</b><div class="klein-t">${i + 1}</div></div>`).join('');
+    k.push(`<div class="karte"><h4>🌡 Wabe entlang (vorne → hinten)</h4><div style="display:flex;gap:3px">${balken}</div>
+      <div class="klein-t" style="margin-top:6px">${j.warm ? `Wärmster Platz ${j.warm}${j.maxC != null ? ` (${zahl(j.maxC, 1)} °C)` : ''} · Brutnest ca. ${j.brutCm} cm`
+        + (j.ende ? ` – <span class="rot-t">Traube am Wabenende (${j.seite === 1 ? 'vorne' : 'hinten'})</span>` : '') : 'Zu wenige Fühler für die Lage.'} · ${swVor(j.zeit * 1000)}</div></div>`);
+    k.push(kurve('Brutnest-Breite (cm)', x.raehmchen.tage.map(t => ({ datum: t.tag, wert: t.brutCm })), '#b45309', 'cm'));
+  }
+  if (x.summen) {
+    const s = x.summen;
+    k.push(kurve('Summen-Muster: Abstand zum eigenen Normal' + (s.auffaellig ? ' – auffällig' : ''), s.tage.map(t => ({ datum: t.tag, wert: t.abstand })), s.auffaellig ? '#b42318' : '#2563eb', ''));
+  }
+  if (!k.length) return '';
+  return `<h3>Erweiterungen</h3><div class="raster">${k.join('')}</div>
+    <p class="klein-t leise">Nur angeschlossene Sensoren erscheinen hier. Das Summen-Muster zeigt eine Veränderung gegen die eigenen letzten zwei Wochen – das kann
+    eine fehlende Königin sein, aber auch Schwarmstimmung, Räuberei oder eine Störung. Hinsehen statt verlassen.</p>`;
+}
+async function swMindest() {
+  const v = document.getElementById('sw-mindest').value;
+  try {
+    await swAbruf(`/api/app/stand/${swStandAktiv}/mindestgewicht`, { method: 'POST', body: JSON.stringify({ volk: swVolkAktiv, kg: v === '' ? null : Number(v) }) });
+    swVolkLaden();
+  } catch (e) { alert(e.message); }
+}
+async function swFlugloch(verengen, gefuettert = false) {
+  if (!confirm(gefuettert ? 'Gefüttert: Flugloch auf 4 Gassen verengen und über den eingestellten Tag hinaus verengt lassen?'
+    : verengen ? 'Flugloch jetzt auf 4 Gassen verengen?' : 'Flugloch wieder ganz öffnen? Die Automatik pausiert dann 24 Stunden.')) return;
+  try {
+    await swAbruf(`/api/app/stand/${swStandAktiv}/flugloch`, { method: 'POST', body: JSON.stringify({ volk: swVolkAktiv, verengen, gefuettert }) });
+    alert('Befehl ist unterwegs – der Zähler bekommt ihn mit der nächsten Runde.');
+  } catch (e) { alert(e.message); }
+}
+// Funk-Knoten „Flugzähler“ einem Volk zuordnen (Stand-Seite)
+function swFlugzaehlerKarte(d) {
+  const l = d.flugzaehler || [];
+  if (!l.length) return '';
+  return `<div class="karte" style="margin-top:12px"><h4>🐝 Flugloch-Zähler</h4>` + l.map(z => `<div class="zeile">Knoten ${z.knoten}
+    <span class="leise klein-t">${swVor(z.zuletzt * 1000)}</span>
+    <select onchange="swFlugzaehler(${z.knoten},this.value)"><option value="">– Volk wählen –</option>${(d.voelker || []).map(v =>
+      `<option value="${v.volk}" ${z.volk === v.volk ? 'selected' : ''}>Waage ${v.volk}${swVolkVon(swStandAktiv, v.volk) ? ' · ' + esc(swVolkVon(swStandAktiv, v.volk).name) : ''}</option>`).join('')}</select></div>`).join('') +
+    '<div class="klein-t leise">An welchem Flugloch sitzt der Zähler? Erst dann laufen seine Zahlen in die Auswertung des Volks.</div></div>';
+}
+async function swFlugzaehler(knoten, volk) {
+  try { await swAbruf(`/api/app/stand/${swStandAktiv}/flugzaehler`, { method: 'POST', body: JSON.stringify({ knoten, volk: volk === '' ? null : Number(volk) }) }); }
+  catch (e) { alert(e.message); }
 }
 
 // Waagen-Karte in der Stockkarte (zeigeVolk in app.js): Platzhalter, wird nachgeladen
@@ -749,11 +951,82 @@ function swTracht(standort, jahr) {
   return '<div id="sw-tracht"></div>';
 }
 
+// Übersicht (app.js): frische Messwerte der Waage am Standplatz, sonst null – ohne Meldung
+async function swMesswerte(o) {
+  if (!o?.waageStand || !swKonto().token) return null;
+  try { return standMesswerte(await swAbruf(`/api/app/stand/${o.waageStand}/uebersicht`)); } catch { return null; }
+}
+// Stationsabgleich (app.js wetter): Tageswerte der Waage { tag, t_min, t_max | t_mittel }, älterer Server (404) oder Fehler → null
+async function swWetterTage(o, von, bis) {
+  if (!o?.waageStand || !swKonto().token) return null;
+  try { return (await swAbruf(`/api/app/stand/${o.waageStand}/wetter-tage?von=${von}&bis=${bis}`)).tage || null; } catch { return null; }
+}
+
 // Arbeitszeit (arbeit.js): Start am Standplatz mit Waage → Bearbeitungsmodus 2 h, Ende → beenden
-function swArbeit(standortId, an) {
+// Arbeitszeit-Uhr ↔ Besuch am Stand (Server: lib/besuche.js). Beginn = Bearbeitungsmodus + keine Meldungen, Ende = aus.
+// Gibt den Besuch zurück (oder null ohne Waage/Anmeldung/Netz).
+async function swArbeit(standortId, an) {
   const o = db.standorte.find(x => x.id === standortId);
-  if (!o?.waageStand || !swKonto().token) return;
-  swAbruf(`/api/app/stand/${o.waageStand}/befehl`, { method: 'POST', body: JSON.stringify({ art: 'bearbeitung', volk: 0, wert: an ? 120 : 0, text: an ? 'Arbeitszeit läuft' : 'Arbeitszeit beendet' }) }).catch(() => {});
+  if (!o?.waageStand || !swKonto().token) return null;
+  try { return (await swAbruf(`/api/app/stand/${o.waageStand}/besuch`, { method: 'POST', body: JSON.stringify({ an }) })).besuch; }
+  catch { return null; }
+}
+async function swBesuchGebucht(id) {
+  try { return (await swAbruf(`/api/app/besuch/${id}/gebucht`, { method: 'POST', body: '{}' })).neu; } catch { return false; }
+}
+
+// ---------- Besuche am Stand (NFC-Aufkleber) → Arbeitszeit ----------
+// Läuft beim Öffnen der App und jede Minute: ein mit NFC begonnener Besuch zeigt die Uhr-Leiste; ein beendeter Besuch
+// (zweiter Scan oder nach 4 h) wird als Arbeitszeit gebucht – genau einmal, auch wenn mehrere Handys die App haben.
+let swAbgleichLaeuft = false, swAbgleichZuletzt = 0;
+async function swBesucheAbgleich(sofort) {
+  if (!swKonto().token || !db.standorte.some(o => o.waageStand) || swAbgleichLaeuft) return;
+  if (!sofort && Date.now() - swAbgleichZuletzt < 55000) return;
+  swAbgleichLaeuft = true; swAbgleichZuletzt = Date.now();
+  try {
+    const liste = (await swAbruf('/api/app/besuche?seit=' + (Math.floor(Date.now() / 1000) - 30 * 86400))).besuche;
+    let geaendert = false;
+    for (const b of liste) {
+      const ort = db.standorte.find(o => o.waageStand === b.stand), u = db.einstellungen.uhr;
+      if (!ort) continue;
+      if (b.ende == null) {                                   // läuft (z. B. per NFC begonnen) → Uhr-Leiste zeigen
+        if (!u) { db.einstellungen.uhr = { start: b.start * 1000, standortId: ort.id, besuchId: b.id, quelle: b.quelle }; geaendert = true; }
+        else if (u.standortId === ort.id && !u.besuchId) { u.besuchId = b.id; geaendert = true; }
+        continue;
+      }
+      if (b.gebucht || (u?.besuchId === b.id && u.beendet)) continue;   // schon gebucht bzw. Buchung in der App offen
+      if (db.arbeitszeiten.some(a => a.besuchId === b.id)) { swBesuchGebucht(b.id); continue; }
+      if (!(await swBesuchGebucht(b.id))) continue;            // ein anderes Handy hat ihn schon gebucht
+      const hinweis = [b.quelle === 'nfc' ? 'NFC-Aufkleber' : 'Arbeitszeit-Uhr', b.auto_ende ? 'nach 4 h von selbst beendet – bitte Ende prüfen' : ''].filter(Boolean).join(', ');
+      db.arbeitszeiten.push({ id: uid(), lohn: lohn(), standortId: ort.id, taetigkeit: 'Durchsicht', start: lokal(b.start * 1000), ende: lokal(b.ende * 1000),
+        minuten: Math.max(1, Math.round((b.ende - b.start) / 60)), datum: lokal(b.start * 1000).slice(0, 10), notiz: hinweis, besuchId: b.id });
+      if (u?.besuchId === b.id) delete db.einstellungen.uhr;
+      geaendert = true;
+    }
+    if (geaendert) { speichern(); render(); }
+  } catch { /* kein Netz: beim nächsten Mal */ }
+  finally { swAbgleichLaeuft = false; }
+}
+setInterval(() => { if (document.visibilityState === 'visible') swBesucheAbgleich(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') swBesucheAbgleich(); });
+setTimeout(() => swBesucheAbgleich(true), 1500);
+
+// Karte am Stand: Adresse für den Aufkleber, auf Android direkt beschreiben (Web NFC)
+function swNfcKarte(stand) {
+  const url = String(swKonto().server || '').replace(/\/$/, '') + '/nfc/' + stand, web = 'NDEFReader' in window;
+  return `<div class="karte" style="margin-top:12px"><h4>📲 NFC-Aufkleber am Stand</h4>
+    <div class="klein-t">Handy an den Aufkleber halten: Arbeit beginnt (Waage im Bearbeitungsmodus, keine Meldungen).
+      Nochmal halten: Ende – die Zeit kommt unter Arbeitszeit an. Nach 4 h endet es von selbst. Beim ersten Mal einmal anmelden.</div>
+    <div style="margin:6px 0;word-break:break-all"><code>${esc(url)}</code></div>
+    <div class="zeile">${web ? `<button onclick="swNfcSchreiben('${esc(url)}')">📲 Aufkleber beschreiben</button>` : ''}
+      <button onclick="navigator.clipboard?.writeText('${esc(url)}').then(()=>alert('Adresse kopiert'))">📋 Adresse kopieren</button></div>
+    <div class="klein-t leise">${web ? 'Nach dem Drücken einen leeren Aufkleber (NTAG213/215) an die Rückseite des Handys halten.'
+      : 'iPhone: Aufkleber mit der App „NFC Tools“ beschreiben (Datensatz „URL“, Adresse oben einfügen).'}
+      Der Server muss von außen erreichbar sein (https-Adresse, nicht localhost). Wetterfesten Aufkleber nehmen, nicht direkt auf Metall.</div></div>`;
+}
+async function swNfcSchreiben(url) {
+  try { await new NDEFReader().write({ records: [{ recordType: 'url', data: url }] }); alert('Aufkleber beschrieben.'); }
+  catch (e) { alert('Hat nicht geklappt: ' + e.message); }
 }
 
 // ---------- Push ----------
@@ -1003,4 +1276,183 @@ async function swNachweiseSuchen() {
     ziel.innerHTML = n.length ? tabelle(['Freigabe', 'Fassung', 'erteilt', 'widerrufen', 'Konto gelöscht', 'aufbewahrt bis'],
       n.map(x => [esc(x.stufe), x.version, d(x.erteilt), d(x.widerrufen), d(x.geloescht), d(x.aufbewahren_bis)])) : '<p class="leise">Keine Nachweise zu diesen Angaben.</p>';
   } catch (e) { ziel.textContent = e.message; }
+}
+
+// ---------- Auswertungen ohne neue Sensoren (Server: lib/auswertung.js, Gedächtnisprotokoll 52) ----------
+// Trachtverlauf und Rangliste der Völker, Ernte-Hinweis als Aufgabe, Jahresvergleich, Akku- und Funk-Übersicht,
+// Kurztext in der Durchsicht, Zusammenfassung als Push nach Zeitplan (Seite „Meldungen“).
+let swJahre = null;
+const swKg = (x, n = 1) => (x >= 0 ? '+' : '') + zahl(x, n) + ' kg';
+function swTrachtKarten(d) {
+  const t = d.tracht;
+  if (!t) return '';
+  const r = t.rangliste, mit = (r?.voelker || []).filter(v => v.summe_kg != null);
+  const k = [];
+  if (t.ernte) k.push(`<div class="karte" style="border-left:4px solid #b45309"><h4>🍯 Tracht klingt ab – Ernte prüfen</h4>
+    <div class="klein-t">Seit ${fmtD(t.ernte.trachtende)} kaum noch Zunahme (bester Tag davor ${swKg(t.ernte.bester_tag_kg)}, zusammen ${swKg(t.ernte.summe_kg)} je Volk in 3 Wochen).
+      Eine Aufgabe „Ernte prüfen“ ist angelegt.</div></div>`);
+  k.push(kurve('Tracht je Tag (Stand, Mittel je Volk)', (t.tage || []).map(x => ({ datum: x.tag, wert: x.eintrag_kg })), '#3d8b40', 'kg'));
+  if (mit.length) k.push(`<div class="karte"><h4>🏆 Rangliste ${fmtD(r.von)}–${fmtD(r.bis)}</h4>
+    <div class="klein-t leise">Tageseinträge (abends minus morgens) zusammengezählt, Tage mit Eingriff ausgelassen. Standmittel ${swKg(r.stand_mittel_kg)}.</div>
+    ${tabelle(['Waage', 'Volk', 'Zunahme', 'zum Stand', 'nachts'], mit.map(v => { const vo = swVolkVon(swStandAktiv, v.volk); return [
+      `<b>${v.volk}</b>`, vo ? esc(vo.name) : '–', swKg(v.summe_kg), marke(swKg(v.abweichung_kg), v.abweichung_kg < -0.5 ? 'rot' : v.abweichung_kg > 0.5 ? 'gruen' : ''),
+      v.nacht_kg != null ? swKg(v.nacht_kg, 2) : '–']; }))}</div>`);
+  k.push(`<div class="karte"><h4>📅 Jahresvergleich</h4>${swJahre && swJahre.stand === swStandAktiv ? swJahreSvg(swJahre.jahre)
+    : `<button onclick="swJahreLaden()">Gewichtskurven der letzten Jahre laden</button>`}
+    <div class="klein-t leise">Nachtgewicht je Tag, Mittel je Volk, eine Linie je Jahr.</div></div>`);
+  return k.join('');
+}
+async function swJahreLaden() {
+  try { swJahre = { stand: swStandAktiv, jahre: (await swAbruf(`/api/app/stand/${swStandAktiv}/jahresvergleich?jahre=4`)).jahre }; }
+  catch (e) { swJahre = { stand: swStandAktiv, jahre: [], fehler: e.message }; }
+  render();
+}
+function swJahreSvg(jahre) {
+  const FARBEN = ['#a87400', '#2563eb', '#3d8b40', '#b42318'];
+  const mit = jahre.filter(j => j.tage.length >= 2);
+  if (!mit.length) return '<p class="leise klein-t">Noch keine Nachtgewichte.</p>';
+  const werte = mit.flatMap(j => j.tage.map(t => t.kg));
+  let lo = Math.min(...werte), hi = Math.max(...werte); if (hi === lo) hi = lo + 1;
+  const mm = m => String(m).padStart(2, '0') + '-01';
+  const x = t => (12 + (Date.parse('2001-' + t) - Date.parse('2001-01-01')) / (365 * 864e5) * 276).toFixed(1), y = kg => (92 - (kg - lo) / (hi - lo) * 72).toFixed(1);
+  return `<svg viewBox="0 0 300 112" style="width:100%"><line x1="12" x2="288" y1="92" y2="92" stroke="#e6dcc4"/>
+    ${[4, 7, 10].map(m => `<line x1="${x(mm(m))}" x2="${x(mm(m))}" y1="20" y2="92" stroke="#e6dcc4" stroke-dasharray="3 3"/>`).join('')}
+    ${mit.map((j, i) => `<polyline fill="none" stroke="${FARBEN[i % 4]}" stroke-width="${j === mit[mit.length - 1] ? 2.4 : 1.4}" points="${j.tage.map(t => x(t.tag) + ',' + y(t.kg)).join(' ')}"/>`).join('')}
+    <text x="12" y="14" font-size="9" fill="#7a6f5a">${zahl(hi, 1)} kg</text><text x="12" y="88" font-size="9" fill="#7a6f5a">${zahl(lo, 1)}</text>
+    ${['Jän', 'Apr', 'Jul', 'Okt'].map((m, i) => `<text x="${x(mm(i * 3 + 1))}" y="106" font-size="9" fill="#7a6f5a">${m}</text>`).join('')}</svg>
+    <div class="klein-t">${mit.map((j, i) => `<span style="color:${FARBEN[i % 4]}">■</span> ${j.jahr}`).join(' &nbsp; ')}</div>`;
+}
+function swAkkuKarte(d) {
+  const a = d.akkus;
+  if (!a) return '';
+  const winter = [10, 11, 0, 1, 2].includes(new Date().getMonth());      // November–März: Akkus schwächeln in der Kälte
+  const zeile = (name, wert, zeit, extra, warn) => [name, warn ? marke(wert, 'rot') : wert, zeit ? swVor(zeit * 1000) : '–', extra || ''];
+  const zeilen = [];
+  if (a.master) zeilen.push(zeile('Master', a.master.akku_v != null ? zahl(a.master.akku_v, 2) + ' V' : '–', a.master.zeit, a.master.lastabwurf ? 'Lastabwurf' : '', a.master.warnung));
+  for (const s of a.slaves) zeilen.push(zeile(`Waage ${s.volk}`, s.spannung_v != null ? zahl(s.spannung_v, 2) + ' V' : '–', s.zeit, `${s.messungen} Messungen${s.fehlrunden ? `, <b>${s.fehlrunden} fehlen</b>` : ''}`, s.warnung));
+  for (const k of a.knoten) zeilen.push(zeile(`${k.art} ${k.knoten}`, k.akku_mv != null ? zahl(k.akku_mv / 1000, 2) + ' V' : k.akku_prozent != null ? k.akku_prozent + ' %' : '–', k.zeit, `${k.messungen} Messungen`, k.warnung));
+  for (const m of a.module) zeilen.push(zeile(`Rähmchen-Modul Volk ${m.volk}`, m.funk ? zahl(m.akku_mv / 1000, 2) + ' V' : 'Kabel', m.zeit, '', m.warnung));
+  if (!zeilen.length) return '';
+  return `<div class="karte" style="margin-top:12px${a.warnungen && winter ? ';border-left:4px solid #b42318' : ''}"><h4>🔋 Akku und Funk (7 Tage)${a.warnungen ? ` · <span class="rot-t">${a.warnungen} prüfen</span>` : ''}</h4>
+    ${tabelle(['Gerät', 'Akku', 'zuletzt', ''], zeilen)}
+    <div class="klein-t leise">Rot: Spannung unter 11,8 V (Waagen) bzw. 3,55 V / 20 % (Funk-Knoten, Module) oder länger als einen Tag nichts gehört.
+      „fehlen“: weniger Messungen als die Waage mit den meisten – der Slave hat Runden verpasst (Funk, Strom).${winter ? ' Vor dem Winter schwache Akkus laden oder tauschen.' : ''}</div></div>`;
+}
+// Ernte-Hinweis → einmal je Trachtende eine Aufgabe „Ernte prüfen“ (gemerkt in einstellungen.swErnte[stand])
+function swErnteAufgabe(stand, ernte, name) {
+  if (!ernte) return;
+  const merk = db.einstellungen.swErnte || (db.einstellungen.swErnte = {});
+  if (merk[stand] === ernte.trachtende) return;
+  merk[stand] = ernte.trachtende;
+  const platz = db.standorte.find(o => o.waageStand === stand);
+  db.aufgaben.push({ id: uid(), titel: `Ernte prüfen – ${name}`, faellig: heute(), standortId: platz?.id || '', volkId: '',
+    notiz: `Die Waagen zeigen seit ${fmtD(ernte.trachtende)} kaum noch Zunahme (zusammen ${swKg(ernte.summe_kg)} je Volk in 3 Wochen). Honigräume ansehen, Reife prüfen.` });
+  speichern();
+}
+async function swErntePruefen(staende) {
+  for (const s of staende || []) {
+    try { const t = await swAbruf(`/api/app/stand/${s.stand}/tracht?tage=7`); swErnteAufgabe(s.stand, t.ernte, s.name || 'Stand ' + s.stand); } catch {}
+  }
+}
+// Durchsicht: Kurztext der Waage (letzte 7 Tage) über dem Formular, mit einem Tipp in die Notiz
+function swDurchsichtKurz() {
+  const form = $('#dlg form'); if (!form || !swKonto().token) return;
+  const box = document.createElement('div'); box.id = 'sw-kurz'; box.className = 'leise klein-t'; box.style.margin = '0 0 10px';
+  form.querySelector('.felder').before(box);
+  const laden = async () => {
+    const v = db.voelker.find(x => x.id === form.querySelector('[name=volkId]')?.value);
+    if (!v?.waage) { box.innerHTML = ''; return; }
+    box.textContent = 'Waage wird geladen …';
+    try {
+      const k = await swAbruf(`/api/app/stand/${v.waage.stand}/kurz?volk=${v.waage.nr}`);
+      box.innerHTML = k.text ? `${esc(k.text)} <button type="button" class="klein" id="sw-kurz-ok">→ in die Notiz</button>` : '';
+      box.querySelector('#sw-kurz-ok')?.addEventListener('click', () => { const n = form.querySelector('[name=notiz]'); n.value = (n.value ? n.value + '\n' : '') + k.text; });
+    } catch (e) { box.textContent = 'Waage: ' + e.message; }
+  };
+  form.querySelector('[name=volkId]')?.addEventListener('change', laden);
+  laden();
+}
+// Seite „Meldungen“: Push ein/aus und die Zusammenfassung nach Zeitplan
+let swZus = null;
+const SW_WTAGE = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+async function swZusLaden() {
+  const standard = { aus: true, uhr: 20, saison_von: '04-01', saison_bis: '08-31', saison_alle: 1, winter_art: 'woche', winter_tag: 0, winter_alle: 7, hinweise_sammeln: false };
+  try { swZus = (await swAbruf('/api/app/zusammenfassung')).einstellung || standard; swFehler = ''; }            // älterer Server: Standard, Speichern meldet den Fehler
+  catch (e) { swZus = standard; swFehler = e.message; }
+  if (ansicht === 'stockwaage' && swAnsicht === 'meldungen') render();
+}
+function swMeldungenSeite() {
+  const z = swZus;
+  const kopfHtml = kopf('Meldungen', swZurueck() + `<button onclick="swPush()">🔔 Push ein/aus/testen</button>`);
+  if (!z) { main().innerHTML = kopfHtml + '<p class="leise">Lade …</p>'; swZusLaden(); return; }
+  const md = s => { const [m, t] = String(s || '').split('-'); return `${Number(t)}.${Number(m)}.`; };
+  const opt = (liste, wert) => liste.map(([v, l]) => `<option value="${v}" ${String(v) === String(wert) ? 'selected' : ''}>${l}</option>`).join('');
+  const alle = [[1, 'jeden Tag'], [2, 'alle 2 Tage'], [3, 'alle 3 Tage'], [7, 'jede Woche']];
+  main().innerHTML = kopfHtml + (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
+    `<div class="karte"><h4>Was kommt wann</h4><div class="klein-t">
+      <b>Alarme</b> (Schwarm, Umsturz, Diebstahl, Räuberei …) kommen immer sofort aufs Handy.<br>
+      <b>Hinweise</b> (Futter knapp, Flugloch verengt, Summen verändert, Akku …) kommen sofort – oder gesammelt in der Zusammenfassung, siehe unten.<br>
+      <b>Zusammenfassung</b> je Stand: Zunahme heute, auffällige Völker, Akkus, Trachtende – zur eingestellten Uhrzeit nach dem Zeitplan. Während eines Besuchs am Stand nicht.</div></div>
+    <div class="karte" style="margin-top:12px"><h4>📬 Zusammenfassung ${z.aus ? '<span class="leise klein-t">(aus)</span>' : ''}</h4>
+      <div class="zeile"><label>Uhrzeit<select id="zs-uhr">${opt([...Array(24).keys()].map(h => [h, `${h}:00 Uhr`]), z.uhr)}</select></label>
+        <label>Hauptsaison von<input id="zs-von" type="text" value="${md(z.saison_von)}" placeholder="1.4." size="6"></label>
+        <label>bis<input id="zs-bis" type="text" value="${md(z.saison_bis)}" placeholder="31.8." size="6"></label>
+        <label>in der Saison<select id="zs-salle">${opt(alle, z.saison_alle)}</select></label></div>
+      <div class="zeile"><label>außerhalb (Winter)<select id="zs-wart" onchange="$('#zs-wtag').style.display=this.value==='woche'?'':'none';$('#zs-walle').style.display=this.value==='tage'?'':'none'">${opt([['woche', 'einmal in der Woche'], ['tage', 'alle X Tage'], ['aus', 'keine']], z.winter_art)}</select></label>
+        <label id="zs-wtag" style="${z.winter_art === 'woche' ? '' : 'display:none'}">Wochentag<select id="zs-wtag-s">${opt(SW_WTAGE.map((t, i) => [i, t]), z.winter_tag)}</select></label>
+        <label id="zs-walle" style="${z.winter_art === 'tage' ? '' : 'display:none'}">alle<select id="zs-walle-s">${opt([[2, '2 Tage'], [3, '3 Tage'], [5, '5 Tage'], [7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage']], z.winter_alle)}</select></label></div>
+      <label class="check"><input type="checkbox" id="zs-sammeln" ${z.hinweise_sammeln ? 'checked' : ''}> Hinweise nicht sofort, sondern gesammelt in der Zusammenfassung (Alarme trotzdem sofort)</label>
+      <div class="zeile" style="margin-top:8px"><button class="haupt" onclick="swZusSpeichern(false)">Speichern</button>
+        ${z.aus ? '' : '<button onclick="swZusSpeichern(true)">Zusammenfassung aus</button>'}<button onclick="swZusTest()">Jetzt eine schicken (Test)</button></div>
+      <div class="klein-t leise" style="margin-top:6px">${z.aus ? 'Noch keine Zusammenfassung eingestellt – Speichern schaltet sie ein.' : `Zuletzt geschickt: ${z.zuletzt ? fmtD(z.zuletzt) : 'noch nie'}.`}
+        Datum als Tag.Monat. eingeben (z. B. 1.4.). Die Saison darf über den Jahreswechsel gehen (z. B. 1.10. bis 28.2.).</div></div>`;
+}
+async function swZusSpeichern(aus) {
+  const md = s => { const m = String(s).trim().match(/^(\d{1,2})\.(\d{1,2})\.?$/); return m ? `${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null; };
+  const von = md($('#zs-von').value), bis = md($('#zs-bis').value);
+  if (!aus && (!von || !bis)) return alert('Saison bitte als Tag.Monat. eingeben, z. B. 1.4. und 31.8.');
+  const b = aus ? { aus: true } : { uhr: Number($('#zs-uhr').value), saison_von: von, saison_bis: bis, saison_alle: Number($('#zs-salle').value), winter_art: $('#zs-wart').value,
+    winter_tag: Number($('#zs-wtag-s').value), winter_alle: Number($('#zs-walle-s').value), hinweise_sammeln: $('#zs-sammeln').checked };
+  try { swZus = (await swAbruf('/api/app/zusammenfassung', { method: 'POST', body: JSON.stringify(b) })).einstellung; swFehler = ''; alert(aus ? 'Zusammenfassung ausgeschaltet.' : 'Gespeichert.'); }
+  catch (e) { swFehler = e.message; }
+  render();
+}
+async function swZusTest() {
+  try { const r = await swAbruf('/api/app/zusammenfassung/test', { method: 'POST', body: '{}' }); alert(`${r.gesendet ? 'Geschickt an ' + r.gesendet + ' Gerät(e).' : 'Kein Gerät für Push angemeldet (🔔 Push einschalten).'}\n\n${r.texte.map(t => t.name + ': ' + t.text).join('\n')}`); }
+  catch (e) { alert('Test: ' + e.message); }
+}
+
+// ---------- Lage der Waage (Lagesensor LIS3DH auf der Platine, Server: lib/erweiterungen.js lageStand) ----------
+// Neigung gegen die Senkrechte; mit Bezug („Jetzt ist sie waagrecht“, mit der Wasserwaage geprüft) die Abweichung davon.
+const SW_LAGE_FARBE = { 'waagrecht': 'gruen', 'leicht schief': 'gelb', 'schief': 'rot' };
+function swLageText(l) {
+  return `${marke(zahl(l.gesamt_grad, 1) + '°', SW_LAGE_FARBE[l.bewertung] || '')} ${esc(l.bewertung)} · ${l.mm_auf_50cm} mm auf 50 cm`;
+}
+function swLageKarte(d) {
+  const w = (d.lage || []).filter(x => x.gesamt_grad != null);
+  if (!w.length) return '';
+  const schief = w.filter(x => x.bewertung !== 'waagrecht').length;
+  return `<div class="karte" style="margin-top:12px"><h4>📐 Steht die Waage waagrecht?${schief ? ` · <span class="rot-t">${schief} prüfen</span>` : ''}</h4>
+    ${tabelle(['Waage', 'Volk', 'Neigung', 'Bezug', 'gemessen'], w.map(x => { const v = swVolkVon(swStandAktiv, x.volk); return [
+      `<b>${x.volk}</b>`, v ? esc(v.name) : '–', swLageText(x), x.bezug ? 'mit Wasserwaage' : '<span class="leise">Platine flach angenommen</span>',
+      swVor(x.zeit * 1000)]; }))}
+    <div class="klein-t leise">Aus dem Lagesensor auf der Platine, stündlich bzw. sofort bei Änderung. Bis 0,5° gilt als waagrecht.
+      Genau wird es mit Bezug: Waage einmal mit der Wasserwaage ausrichten und beim Volk „Jetzt ist sie waagrecht“ drücken.</div></div>`;
+}
+function swLageVolk(l, stand, nr) {
+  const achse = (g, a, b) => Math.abs(g) < 0.2 ? '' : ` · ${g > 0 ? a : b} ${zahl(Math.abs(g), 1)}°`;
+  return `<div class="karte"><h4>📐 Lage der Waage</h4>
+    <div style="font-size:1.1em">${swLageText(l)}</div>
+    <div class="klein-t">Platine: um die Querachse${achse(l.kipp_x_grad, 'vorne höher', 'hinten höher')}, um die Längsachse${achse(l.kipp_y_grad, 'links höher', 'rechts höher')}
+      ${l.bezug ? '· gegen den Bezug (Wasserwaage)' : '· Platine flach angenommen'} · ${swVor(l.zeit * 1000)}</div>
+    <div class="zeile" style="margin-top:6px"><button class="klein" onclick="swLageBezug('${stand}',${nr},false)">Jetzt ist sie waagrecht (Wasserwaage)</button>
+      ${l.bezug ? `<button class="klein" onclick="swLageBezug('${stand}',${nr},true)">Bezug löschen</button>` : ''}</div>
+    <div class="klein-t leise">„Vorne/hinten, links/rechts“ bezieht sich auf die Platine im Gehäuse; welche Seite der Beute das ist, hängt vom Einbau ab.
+      Der Bezug gilt ab dem letzten Messwert – vorher die Waage ausrichten und eine Runde (bis 15 min) warten.</div></div>`;
+}
+async function swLageBezug(stand, nr, loeschen) {
+  if (!loeschen && !confirm('Steht die Waage jetzt genau waagrecht (mit der Wasserwaage geprüft) und ist seit dem Ausrichten eine Messrunde vergangen?')) return;
+  try { await swAbruf(`/api/app/stand/${stand}/lagebezug`, { method: 'POST', body: JSON.stringify({ volk: nr, loeschen }) }); }
+  catch (e) { alert('Lage: ' + e.message); }
+  swVolkLaden();
 }

@@ -13,16 +13,22 @@ function uhrStart(standortId) {
   if (db.einstellungen.uhr) return;
   db.einstellungen.uhr = { start: Date.now(), standortId: standortId ?? (db.standorte.length === 1 ? db.standorte[0].id : '') };
   speichern(); render();
-  swArbeit(db.einstellungen.uhr.standortId, true);       // Stockwaage: Stand in den Bearbeitungsmodus
+  // Stockwaage: Besuch am Stand beginnen (Bearbeitungsmodus, keine Meldungen); lief schon einer (NFC), dessen Beginn nehmen
+  swArbeit(db.einstellungen.uhr.standortId, true).then(b => {
+    const u = db.einstellungen.uhr; if (!b || !u) return;
+    u.besuchId = b.id; u.start = Math.min(u.start, b.start * 1000); speichern(); render();
+  });
 }
 function uhrStopp() {
   const u = db.einstellungen.uhr; if (!u) return;
-  swArbeit(u.standortId, false);                          // Stockwaage: Bearbeitungsmodus beenden
+  u.beendet = true; speichern();                          // Buchung läuft hier – der Abgleich bucht diesen Besuch nicht selbst
+  swArbeit(u.standortId, false);                          // Stockwaage: Besuch beenden
   zeitFormular(null, { standortId: u.standortId, start: lokal(u.start), ende: lokal(Date.now()), taetigkeit: 'Durchsicht' }, true);
 }
 function uhrVerwerfen() {
   if (!confirm('Laufende Zeitmessung verwerfen? Die Zeit wird nicht gebucht.')) return;
-  swArbeit(db.einstellungen.uhr?.standortId, false);       // Stockwaage: Bearbeitungsmodus beenden
+  const u = db.einstellungen.uhr;
+  swArbeit(u?.standortId, false).then(() => u?.besuchId && swBesuchGebucht(u.besuchId));   // nicht später selbst buchen
   delete db.einstellungen.uhr; speichern(); render();
 }
 function uhrLeiste() {
@@ -58,9 +64,13 @@ function zeitFormular(id, vorgabe = {}, vonUhr = false) {
     const minuten = Math.round((new Date(w.ende) - new Date(w.start)) / 6e4) - (w.pause || 0);
     if (!(minuten > 0)) { alert('Das Ende muss nach dem Beginn liegen.'); return zeitFormular(id, w, vonUhr); }
     if (minuten > 14 * 60 && !confirm(`Das sind ${dauerText(minuten)} – stimmt das?`)) return zeitFormular(id, w, vonUhr);
-    const e = { ...w, minuten, datum: w.start.slice(0, 10) };
+    const e = { ...w, minuten, datum: w.start.slice(0, 10), ...(vonUhr && db.einstellungen.uhr?.besuchId ? { besuchId: db.einstellungen.uhr.besuchId } : {}) };
     if (alt) Object.assign(alt, e); else db.arbeitszeiten.push({ id: uid(), lohn: lohn(), ...e });
-    if (vonUhr) delete db.einstellungen.uhr;
+    if (vonUhr) {
+      const bid = db.einstellungen.uhr?.besuchId;
+      if (bid) swBesuchGebucht(bid);                       // Stockwaage: Besuch ist damit gebucht
+      delete db.einstellungen.uhr;
+    }
     speichern(); render();
   }, alt && (() => { db.arbeitszeiten = db.arbeitszeiten.filter(a => a.id !== id); speichern(); render(); }));
 }

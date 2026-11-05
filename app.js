@@ -1,7 +1,7 @@
 // ---------- Daten ----------
-const VERSION = '1.2.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
+const VERSION = '1.3.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [], fuetterungen: [], fuetterRunden: [] });
 let db = laden();
 function laden() { try { return uebernehmen(Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {})); } catch { return leer(); } }
 // Ältere Datenstände anpassen: Trachtkarte lag früher im Textfeld „Trachtangebot“ (tracht)
@@ -106,6 +106,15 @@ const DEF = {
     { k: 'wartezeit', label: 'Wartezeit (Tage)', typ: 'number', step: 1 },
     { k: 'anwender', label: 'Anwender' },
     { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
+  fuetterungen: { titel: 'Fütterung', neu: () => ({ datum: heute(), mischung: fuEinst().mischung, lagerId: fuEinst().lagerId, zustand: 'gebucht', quelle: 'eingegeben' }),
+    nachher: fuLager, geloescht: id => bewegungenZurueck('fuetterungId', id), felder: () => [
+    { k: 'volkId', label: 'Volk', typ: 'select', opts: optV(), req: 1 },
+    { k: 'datum', label: 'Datum', typ: 'date', req: 1 },
+    { k: 'kg', label: 'Futtermenge (kg, wie gewogen)', typ: 'number', step: 0.1, min: 0, req: 1 },
+    { k: 'mischung', label: 'Futter', typ: 'select', opts: FU_MISCH },
+    { k: 'lagerId', label: 'Aus dem Lager abbuchen', typ: 'select', opts: [['', '– nicht abbuchen –'], ...fuLagerOpts()] },
+    { k: 'zustand', label: 'Zustand', typ: 'select', opts: [['gebucht', 'gebucht'], ['vorgebucht', 'vorgebucht (noch nicht gefüttert)']] },
+    { k: 'notiz', label: 'Notiz', typ: 'textarea', breit: 1 }] },
   ernten: { titel: 'Ernte', neu: () => ({ datum: heute(), produkt: 'Honig', insLager: true }), nachher: ernteLagern, geloescht: id => bewegungenZurueck('ernteId', id), felder: () => [
     { k: 'datum', label: 'Datum', typ: 'date', req: 1 },
     { k: 'produkt', label: 'Produkt', typ: 'select', opts: ['Honig', 'Wachs', 'Propolis', 'Pollen', 'Gelée Royale'] },
@@ -201,7 +210,7 @@ function bearbeiten(typ, id, vorgabe = {}) {
   formular(alt ? `${def.titel} bearbeiten` : `${def.titel} eintragen`, def.felder(), alt || { ...def.neu?.(), ...vorgabe },
     w => { const e = alt ? Object.assign(alt, w) : { id: uid(), ...w }; if (!alt) db[typ].push(e); def.nachher?.(e); speichern(); render(); },
     alt && (() => { db[typ] = db[typ].filter(x => x.id !== id); def.geloescht?.(id); speichern(); if (typ === 'voelker') detailVolk = null; render(); }));
-  if (typ === 'durchsichten') sprachLeiste();
+  if (typ === 'durchsichten') { sprachLeiste(); if (typeof swDurchsichtKurz === 'function') swDurchsichtKurz(); }   // Waage: Kurztext der letzten 7 Tage
 }
 
 // ---------- Navigation ----------
@@ -284,11 +293,21 @@ function zeigeStart() {
   raus();
   main().innerHTML = kopf('Übersicht', '<button class="klein" onclick="gehe(\'einstellungen\')">⚙ Anpassen</button>') + visKarte() + html;
   const s = $('#start-wetter') && db.standorte.find(hatKoord);
-  if (s) wetter(s).then(d => {
-    const el = $('#start-wetter'); if (!el) return;
-    const t = d.tage.find(x => x.datum === heute()) || d.tage[0], f = flug(t), p = phase(d.gts, heute());
-    el.className = 'karte klick'; el.onclick = () => gehe('vegetation');
-    el.innerHTML = `<h4>${esc(s.name)}: ${wetterText(d.jetzt.code)} ${zahl(d.jetzt.temp)} °C</h4>Flugwetter heute: ${marke(f[1], f[0])} · Grünlandtemperatursumme ${zahl(d.gts, 0)} · ${esc(p.name)}`;
+  if (!s) return;
+  // Erst die Vorhersage zeigen, Messwerte der Waage (Server evtl. nicht erreichbar) danach ergänzen
+  const messung = swMesswerte(s);
+  wetter(s).then(d => {
+    const zeichnen = m => {
+      const el = $('#start-wetter'); if (!el) return;
+      const t = d.tage.find(x => x.datum === heute()) || d.tage[0], f = flug(flugMitMessung(t, m)), p = phase(d.gts, heute());
+      const gemessen = m && [m.wind != null && `Wind ${zahl(m.wind, 0)} km/h`, m.regen != null && `Regen heute ${zahl(m.regen)} mm`].filter(Boolean);
+      const flugText = m ? `Flugwetter jetzt: ${marke(f[1], f[0])}${gemessen.length ? ' · gemessen am Stand: ' + gemessen.join(', ') : ''}${m.tendenz < -3 ? ' · ' + UMSCHWUNG : ''}` : `Flugwetter heute: ${marke(f[1], f[0])}`;
+      const temp = m?.temp != null ? `${zahl(m.temp)} °C <span class="leise klein-t">gemessen am Stand</span>` : `${zahl(d.jetzt.temp)} °C`;
+      el.className = 'karte klick'; el.onclick = () => gehe('vegetation');
+      el.innerHTML = `<h4>${esc(s.name)}: ${wetterText(d.jetzt.code)} ${temp}</h4>${flugText} · Grünlandtemperatursumme ${zahl(d.gts, 0)} · ${esc(p.name)}`;
+    };
+    zeichnen(null);
+    messung.then(m => m && zeichnen(m));
   }).catch(() => { const el = $('#start-wetter'); if (el) el.textContent = 'Wetterdaten nicht erreichbar (keine Internetverbindung?).'; });
 }
 
@@ -366,11 +385,11 @@ function zeigeVolk(v) {
   const honig = db.ernten.filter(e => e.volkId === id && e.produkt === 'Honig').reduce((s, e) => s + (e.kg || 0), 0);
   main().innerHTML = kopf(`<button class="klein" onclick="detailVolk=null;render()">←</button> Stockkarte ${esc(v.name)}`,
     `<button class="haupt" onclick="bearbeiten('durchsichten',null,{volkId:'${id}'})">+ Durchsicht</button><button onclick="bearbeiten('behandlungen',null,{volkId:'${id}'})">+ Behandlung</button>
-     <button onclick="bearbeiten('ernten',null,{volkId:'${id}',standortId:'${v.standortId || ''}'})">+ Ernte</button><button onclick="vzVolk='${id}';gehe('varroa')">📷 Varroa zählen</button><button onclick="wandern('${id}')">Umstellen</button><button onclick="bearbeiten('voelker','${id}')">Bearbeiten</button>`) +
+     <button onclick="bearbeiten('fuetterungen',null,{volkId:'${id}'})">+ Fütterung</button><button onclick="bearbeiten('ernten',null,{volkId:'${id}',standortId:'${v.standortId || ''}'})">+ Ernte</button><button onclick="vzVolk='${id}';gehe('varroa')">📷 Varroa zählen</button><button onclick="wandern('${id}')">Umstellen</button><button onclick="bearbeiten('voelker','${id}')">Bearbeiten</button>`) +
     `<div class="karte"><b>${sName(v.standortId)}</b> · ${esc(v.beute)} · Status ${esc(v.status)}<br>
       Königin: ${koeniginPunkt(v.koeniginJahr) || '–'} · ${esc(v.rasse)}${v.koeniginHerkunft ? ' · ' + esc(v.koeniginHerkunft) : ''}${v.gezeichnet ? ' · gezeichnet' : ''}<br>
       Honigertrag gesamt: ${zahl(honig)} kg ${volkHinweise(v).map(([f, t]) => marke(t, f)).join(' ')}${v.notiz ? `<div class="leise">${esc(v.notiz)}</div>` : ''}</div>
-    ${kurvenHtml(id)}${swStockkarte(v)}<h3>Durchsichten</h3>` +
+    ${kurvenHtml(id)}${swStockkarte(v)}${fuKarte(v)}<h3>Durchsichten</h3>` +
     tabelle(['Datum', 'Weisel', 'Zellen', 'Brut', 'Gassen', 'Futter', 'Sanftmut', 'Varroa/Tag', 'kg', 'Maßnahmen / Notiz', ''], ds.map(d => [
       fmtD(d.datum), marke(d.weisel, d.weisel === 'weisellos' ? 'rot' : d.weisel === 'unklar' ? 'gelb' : 'gruen'), esc(d.zellen), zahl(d.brutwaben), zahl(d.gassen), esc(d.futter), zahl(d.sanftmut),
       d.varroa == null ? '–' : marke(zahl(d.varroa), varroaFarbe(d.varroa)), zahl(d.gewicht), esc([d.massnahmen, d.notiz].filter(Boolean).join(' – ')),
@@ -669,9 +688,13 @@ function abhaken(id) { const a = db.aufgaben.find(x => x.id === id); a.erledigt 
 // ---------- Vegetation & Wetter (Open-Meteo, ortsbezogen) ----------
 async function wetter(s) {
   const ck = 'imkerei-wx-' + s.id, c = JSON.parse(localStorage.getItem(ck) || 'null');
-  if (c && c.v === 2 && Date.now() - c.t < 3600e3 && c.lat === s.lat && c.lon === s.lon) return c.d;
-  const d = await holeWetter(s.lat, s.lon);
-  localStorage.setItem(ck, JSON.stringify({ v: 2, t: Date.now(), lat: s.lat, lon: s.lon, d }));
+  if (c && c.v === 3 && Date.now() - c.t < 3600e3 && c.lat === s.lat && c.lon === s.lon) return c.d;
+  const jahr = new Date().getFullYear(), gestern = iso(new Date(Date.now() - 864e5));
+  const [gs, stunden, stTage] = await Promise.all([gsTage(s.lat, s.lon).catch(() => null), gsStunden(s.lat, s.lon).catch(() => null),
+    // Waage-Server höchstens 4 s abwarten (PC aus) – sonst ohne Stationsabgleich
+    s.waageStand ? Promise.race([swWetterTage(s, `${jahr}-01-01`, gestern), new Promise(r => setTimeout(r, 4000, null))]) : null]);
+  const d = await holeWetter(s.lat, s.lon, { gs, stunden, versatz: gs ? stationsVersatz(gs, stTage) : null });
+  localStorage.setItem(ck, JSON.stringify({ v: 3, t: Date.now(), lat: s.lat, lon: s.lon, d }));
   return d;
 }
 
@@ -700,12 +723,12 @@ async function zeigeVegetation() {
   $('#veg').className = '';
   $('#veg').innerHTML = `<div class="raster">
       <div class="karte"><div class="leise klein-t">Aktuell</div><h4>${wetterText(d.jetzt.code)} ${zahl(d.jetzt.temp)} °C</h4>Luftfeuchte ${zahl(d.jetzt.feuchte, 0)} % · Wind ${zahl(d.jetzt.wind, 0)} km/h</div>
-      <div class="karte"><div class="leise klein-t">Grünlandtemperatursumme</div><h4>${zahl(d.gts, 0)}</h4>${d.beginn ? `Vegetationsbeginn (200) am ${fmtD(d.beginn)}` : `noch ${zahl(200 - d.gts, 0)} bis Vegetationsbeginn`}${d.fehlend ? `<div class="leise klein-t">${d.fehlend} Tage ohne Messwert</div>` : ''}</div>
+      <div class="karte"><div class="leise klein-t">Grünlandtemperatursumme</div><h4>${zahl(d.gts, 0)}</h4>${d.beginn ? `Vegetationsbeginn (200) am ${fmtD(d.beginn)}` : `noch ${zahl(200 - d.gts, 0)} bis Vegetationsbeginn`}${d.fehlend ? `<div class="leise klein-t">${d.fehlend} Tage ohne Messwert</div>` : ''}<div class="leise klein-t">${waermeQuelleText(d)}</div></div>
       <div class="karte"><div class="leise klein-t">Phänologische Jahreszeit</div><h4>${esc(p.name)}</h4><span class="klein-t">Zeigerpflanzen: ${esc(p.zeiger)}</span></div></div>
     <ul class="hinweise" style="margin-top:12px"><li class="gruen"><b>Am Bienenstand jetzt:</b> ${esc(p.tipp)}</li></ul>
     ${arbeitenHtml(s, d)}
     <h3>Flugwetter – 7 Tage</h3><div class="tage">${d.tage.map(t => { const f = flug(t); return `<div class="karte"><div class="klein-t">${new Date(t.datum).toLocaleDateString('de-AT', { weekday: 'short', day: 'numeric', month: 'numeric' })}</div><div class="gross">${wetterText(t.code).split(' ')[0]}</div>
-      <b>${zahl(t.tmax, 0)}°</b> / ${zahl(t.tmin, 0)}°<div class="leise klein-t">${zahl(t.regen)} mm · ${zahl(t.wind, 0)} km/h</div>${marke(f[1], f[0])}</div>`; }).join('')}</div>
+      <b>${zahl(t.tmax, 0)}°</b> / ${zahl(t.tmin, 0)}°<div class="leise klein-t">${zahl(t.regen)} mm · ${zahl(t.wind, 0)} km/h</div>${flugstundenText(t) ? `<div class="leise klein-t">${flugstundenText(t)}</div>` : ''}${marke(f[1], f[0])}</div>`; }).join('')}</div>
     <h3>Trachtkalender (Schätzung für diesen Ort)</h3>` +
     trachtTabelle(s, d) +
     `<p class="leise klein-t">Blühfenster sind Richtwerte aus der Wärmesumme. Trage den Blühbeginn ein, den du am Stand siehst – die App passt Kalender und Arbeiten dann an diesen Standplatz an.</p>
@@ -713,7 +736,7 @@ async function zeigeVegetation() {
     <h3>Verlauf der Grünlandtemperatursumme ${heute().slice(0, 4)}</h3>
     <svg class="diagramm" viewBox="0 0 ${Math.max(n, 2)} 200" preserveAspectRatio="none"><line x1="0" x2="${n}" y1="${y(200)}" y2="${y(200)}" stroke="#3d8b40" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
       <polyline fill="none" stroke="#e0a100" stroke-width="2.5" vector-effect="non-scaling-stroke" points="${d.verlauf.map((v, i) => `${i},${y(v).toFixed(1)}`).join(' ')}"/></svg>
-    <p class="leise klein-t">Gestrichelt: Schwelle 200 (Vegetationsbeginn). Wetterdaten: Open-Meteo, Standort ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}.</p>`;
+    <p class="leise klein-t">Gestrichelt: Schwelle 200 (Vegetationsbeginn). ${QUELLEN}. Standort ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}.</p>`;
 }
 
 // ---------- Daten ----------

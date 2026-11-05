@@ -14,16 +14,43 @@ const flug = t => t.tmax >= 14 && t.regen < 1 && t.wind < 25 ? ['gruen', 'gut'] 
 // Grünlandtemperatursumme: positive Tagesmittel ab 1.1., Jänner ×0,5, Februar ×0,75
 const gtsAnteil = (datum, t) => t > 0 ? t * (datum.slice(5, 7) === '01' ? 0.5 : datum.slice(5, 7) === '02' ? 0.75 : 1) : 0;
 
-async function holeWetter(lat, lon) {
+// Flugstunden je Tag aus der Stundenvorhersage. Fenster 8–19 Uhr = Zeitstempel 9 bis 19 (Wert gilt für die Stunde davor).
+// Andere Tage als `tag` nur mit vollständigem Fenster; boe = größte Böe im Fenster in km/h.
+function flugstunden(stunden, tag = heute()) {
+  const je = {}, gut = h => h.t >= 15 && h.regen != null && h.regen < 0.2 && h.wind != null && h.wind < 5 && h.boe != null && h.boe < 10 && (h.strahlung > 150 || h.sonne > 1200);
+  for (const h of stunden || []) {
+    const std = +h.zeit.slice(11, 13);
+    if (std >= 9 && std <= 19) (je[h.zeit.slice(0, 10)] ||= []).push(h);
+  }
+  const aus = {};
+  for (const [datum, hs] of Object.entries(je)) {
+    if (datum !== tag && hs.length < 11) continue;
+    const gute = hs.filter(gut).map(h => +h.zeit.slice(11, 13)), boen = hs.map(h => h.boe).filter(b => b != null);
+    aus[datum] = { flugstunden: gute.length, von: gute.length ? Math.min(...gute) - 1 : null, bis: gute.length ? Math.max(...gute) : null,
+      boe: boen.length ? Math.round(Math.max(...boen) * 36) / 10 : null };
+  }
+  return aus;
+}
+// Kurztext für die Tageskachel: „10–16 Uhr · 6 Flugstunden“; Tag ohne Stundendaten → ''
+function flugstundenText(t) {
+  if (t.flugstunden == null) return '';
+  if (!t.flugstunden) return 'keine Flugstunden';
+  return `${t.von}–${t.bis} Uhr · ${t.flugstunden} Flugstunde${t.flugstunden === 1 ? '' : 'n'}`;
+}
+
+// zusatz = { gs: { datum: [tn, tx, rr] }, versatz, stunden }: GeoSphere-Tage ersetzen das Open-Meteo-Archiv, Stunden liefern Flugstunden.
+async function holeWetter(lat, lon, zusatz = {}) {
   const hole = async url => { const r = await fetch(url); if (!r.ok) throw new Error(r.status); return r.json(); };
+  const gs = zusatz.gs || null, versatz = gs ? zusatz.versatz ?? null : null;
   const jahr = new Date().getFullYear(), ende = iso(new Date(Date.now() - 6 * 864e5)), q = `latitude=${lat}&longitude=${lon}&timezone=auto`;
   const [fc, ar, aq] = await Promise.all([
     hole(`https://api.open-meteo.com/v1/forecast?${q}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,wind_speed_10m_max&past_days=14&forecast_days=7`),
-    ende > `${jahr}-01-01` ? hole(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${jahr}-01-01&end_date=${ende}&daily=temperature_2m_mean`).catch(() => null) : null,
+    !gs && ende > `${jahr}-01-01` ? hole(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${jahr}-01-01&end_date=${ende}&daily=temperature_2m_mean`).catch(() => null) : null,
     hole(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&current=alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen`).catch(() => null)]);
   const mittel = {};
   ar?.daily.time.forEach((d, i) => { if (ar.daily.temperature_2m_mean[i] != null) mittel[d] = ar.daily.temperature_2m_mean[i]; });
   fc.daily.time.forEach((d, i) => { if (fc.daily.temperature_2m_mean[i] != null) mittel[d] = fc.daily.temperature_2m_mean[i]; });
+  if (gs) Object.entries(gs).forEach(([d, [tn, tx]]) => { mittel[d] = (tn + tx) / 2 + (versatz ?? 0); });
   let gts = 0, fehlend = 0, beginn = null; const verlauf = [];
   for (let d = new Date(jahr, 0, 1); iso(d) <= heute(); d.setDate(d.getDate() + 1)) {
     const t = mittel[iso(d)];
@@ -32,9 +59,10 @@ async function holeWetter(lat, lon) {
     verlauf.push(Math.round(gts));
   }
   const tage = fc.daily.time.map((d, i) => ({ datum: d, code: fc.daily.weather_code[i], tmax: fc.daily.temperature_2m_max[i], tmin: fc.daily.temperature_2m_min[i], tmittel: fc.daily.temperature_2m_mean[i], regen: fc.daily.precipitation_sum[i] ?? 0, wind: fc.daily.wind_speed_10m_max[i] ?? 0 })).filter(t => t.datum >= heute() && t.tmax != null);
+  if (zusatz.stunden) { const fl = flugstunden(zusatz.stunden); tage.forEach(t => Object.assign(t, fl[t.datum])); }
   // Voraussichtliche Wärmesumme der nächsten Tage laut Vorhersage
   let g = gts; const prognose = tage.filter(t => t.datum > heute()).map(t => ({ datum: t.datum, gts: g += gtsAnteil(t.datum, t.tmittel ?? 0) }));
-  return { gts, fehlend, beginn, verlauf, tage, prognose, pollen: aq?.current || null,
+  return { gts, fehlend, beginn, quelle: gs ? 'GeoSphere 1 km' : 'Open-Meteo', versatz, verlauf, tage, prognose, pollen: aq?.current || null,
     jetzt: { temp: fc.current.temperature_2m, feuchte: fc.current.relative_humidity_2m, wind: fc.current.wind_speed_10m, code: fc.current.weather_code } };
 }
 
@@ -121,8 +149,13 @@ function besterTag(tage, art) {
   const wie = t => `${tagText(t.datum)}, ${Math.round(t.tmax)} °C, ${t.regen < 1 ? 'trocken' : t.regen.toFixed(1).replace('.', ',') + ' mm Regen'}`;
   let t, vorwort = 'Empfohlener Tag';
   if (art === 'kalt') { t = tage.find(t => t.tmax <= 5 && t.regen < 2); if (!t) { t = [...tage].sort((a, b) => a.tmax - b.tmax)[0]; vorwort = 'Noch zu warm, kältester Tag'; } }
-  else if (art === 'as') t = tage.find(t => t.tmax >= 15 && t.tmax <= 25 && t.regen < 2);
-  else if (art === 'durchsicht') { t = tage.find(t => t.tmax >= 15 && t.regen < 1 && t.wind < 30); if (!t) { t = tage.find(t => t.tmax >= 12 && t.regen < 3); vorwort = 'Bedingt geeignet (kurz halten)'; } }
+  else if (art === 'as') t = tage.find(t => t.tmax >= 15 && t.tmax <= 25 && t.regen < 2 && !(t.boe > 43.2));   // Böen über 12 m/s
+  else if (art === 'durchsicht') {
+    // Tage mit Stundenvorhersage zählen nur über die Flugstunden, die übrigen nach der Tagesregel
+    t = tage.find(t => t.flugstunden != null ? t.flugstunden >= 4 : t.tmax >= 15 && t.regen < 1 && t.wind < 30);
+    if (t?.flugstunden != null) return { datum: t.datum, text: `${vorwort}: ${new Date(t.datum + 'T12:00').toLocaleDateString('de-AT', { weekday: 'long' })}, ${t.von}–${t.bis} Uhr gut, ${Math.round(t.tmax)} °C` };
+    if (!t) { t = tage.find(t => t.tmax >= 12 && t.regen < 3); vorwort = 'Bedingt geeignet (kurz halten)'; }
+  }
   else return null;
   return t ? { datum: t.datum, text: `${vorwort}: ${wie(t)}` } : { datum: null, text: 'In den nächsten 7 Tagen kein passendes Wetter' };
 }
