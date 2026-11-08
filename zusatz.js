@@ -145,7 +145,12 @@ function beobachten(sid, i) {
 // ---------- Trachtkarte: Flächennutzung im Flugradius aus OpenStreetMap ----------
 // Flugradius in km, unter Standplätze einstellbar (0,5–10 km)
 const flugradius = () => db.einstellungen.flugradius || 3;
-function radiusSetzen(v) { db.einstellungen.flugradius = Math.min(10, Math.max(0.5, reZahl(v) || 3)); speichern(); render(); }
+// Größerer Radius kann am Server die Satellitengeschichte neu auslösen – dann erst fragen (satellit.js); Nein → alter Wert bleibt
+function radiusSetzen(v) {
+  const r = Math.min(10, Math.max(0.5, reZahl(v) || 3));
+  if (typeof satRadiusOk !== 'function' || satRadiusOk(r)) { db.einstellungen.flugradius = r; speichern(); }
+  render();
+}
 const TRACHTFLAECHEN = [
   ['Raps (kartiert)', '#f2d200', t => t.crop === 'rapeseed'],
   ['Obst', '#e2557a', t => t.landuse === 'orchard'],
@@ -175,18 +180,24 @@ function ringeVerbinden(teile) {
 }
 const imRing = (lat, lon, r) => { let innen = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][0] > lat) !== (r[j][0] > lat) && lon < (r[j][1] - r[i][1]) * (lat - r[i][0]) / (r[j][0] - r[i][0]) + r[i][1]) innen = !innen; return innen; };
 let trachtEbene = null;
-async function trachtkarte(sid) {
-  const s = standort(sid), info = $('#tracht-info');
-  if (!karte || !hatKoord(s)) return;
-  info.innerHTML = '<p class="leise">Lade Flächendaten aus OpenStreetMap … das kann bis zu einer halben Minute dauern.</p>';
-  const r = flugradius(), um = `(around:${r * 1000},${s.lat},${s.lon})`, lu = '"landuse"~"^(forest|orchard|meadow|farmland|vineyard|residential|allotments)$"', na = '"natural"~"^(wood|grassland|heath|scrub)$"';
+// Laufzähler: ein neuer Aufruf macht ältere wirkungslos. Ziel ist die Kachel unter dem Potenzial (oder z. B. die Suche);
+// s darf ein Punkt ohne id sein (dann wird nichts gespeichert). Ist die Lade-Anzeige im Ziel ersetzt (Potenzial neu), schreibt der Lauf nichts mehr.
+// neuLaden: onclick-Code für den Knopf „Trachtkarte neu laden“ bei einem Punkt ohne id (ohne: kein Knopf); mit id kommt die Kachel aus trachtKachel (ertrag.js)
+let trachtLauf = 0;
+async function trachtkarte(sid, s = standort(sid), r = flugradius(), ziel = '#tracht-karte', neuLaden = '') {
+  const el = $(ziel);
+  if (!s || !hatKoord(s) || !el) return;   // erst danach zählen: ein Aufruf ohne Koordinaten bricht keinen laufenden Lauf ab
+  const lauf = ++trachtLauf;
+  el.innerHTML = '<p class="leise tracht-laden">Lade Flächendaten aus OpenStreetMap … das kann bis zu einer halben Minute dauern.</p>';
+  const gilt = () => lauf === trachtLauf && $(`${ziel} .tracht-laden`);
+  const um = `(around:${r * 1000},${s.lat},${s.lon})`, lu = '"landuse"~"^(forest|orchard|meadow|farmland|vineyard|residential|allotments)$"', na = '"natural"~"^(wood|grassland|heath|scrub)$"';
   let els;
   try {
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(`[out:json][timeout:40];(way[${lu}]${um};way[${na}]${um};relation[${lu}]${um};relation[${na}]${um};);out geom;`) });
-    if (!r.ok) throw new Error(r.status);
-    els = (await r.json()).elements;
-  } catch { info.innerHTML = '<p class="leer">Die Kartendaten sind gerade nicht erreichbar. Bitte später nochmal versuchen.</p>'; return; }
-  if (!karte || !$('#tracht-info')) return;
+    const a = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(`[out:json][timeout:40];(way[${lu}]${um};way[${na}]${um};relation[${lu}]${um};relation[${na}]${um};);out geom;`) });
+    if (!a.ok) throw new Error(a.status);
+    els = (await a.json()).elements;
+  } catch { if (gilt()) $(ziel).innerHTML = '<p class="leer">Die Kartendaten sind gerade nicht erreichbar. Bitte später nochmal versuchen.</p>'; return; }
+  if (!gilt()) return;
   const flaechen = [];
   for (const e of els) {
     const kat = TRACHTFLAECHEN.findIndex(k => k[2](e.tags || {}));
@@ -203,16 +214,21 @@ async function trachtkarte(sid) {
     for (const f of flaechen) if (f.kat < beste && lat <= f.n && lat >= f.s && lon <= f.o && lon >= f.w && imRing(lat, lon, f.ring)) beste = f.kat;
     if (beste < 99) treffer[beste]++;
   }
-  trachtEbene?.remove();
-  trachtEbene = L.layerGroup(flaechen.map(f => L.polygon(f.ring, { stroke: false, fillColor: TRACHTFLAECHEN[f.kat][1], fillOpacity: 0.5, interactive: false }))).addTo(karte);
-  karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000 + 400));
-  s.trachtkarte = { datum: heute(), radius: r, anteile: treffer.map(t => +(t / punkte * 100).toFixed(1)) }; speichern();
-  info.innerHTML = trachtInfo(s);
+  if (karte) {
+    trachtEbene?.remove();
+    trachtEbene = L.layerGroup(flaechen.map(f => L.polygon(f.ring, { stroke: false, fillColor: TRACHTFLAECHEN[f.kat][1], fillOpacity: 0.5, interactive: false }))).addTo(karte);
+    karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000 + 400));
+  }
+  s.trachtkarte = { datum: heute(), radius: r, anteile: treffer.map(t => +(t / punkte * 100).toFixed(1)) };
+  if (s.id) speichern();
+  $(ziel).innerHTML = s.id ? trachtKachel(s)
+    : trachtInfo(s, neuLaden ? `<div class="zeile" style="margin-top:6px"><button class="klein" onclick="${neuLaden}">Trachtkarte neu laden</button></div>` : '');
 }
-function trachtInfo(s) {
+// extra: zusätzlicher Inhalt am Ende der Karte (z. B. Knopf „neu laden“)
+function trachtInfo(s, extra = '') {
   const t = s.trachtkarte, r = t.radius || 3, ha = Math.PI * r * r * 100, rest = Math.max(0, 100 - t.anteile.reduce((a, b) => a + b, 0));
   return `<div class="karte" style="margin-bottom:12px"><h4>Trachtkarte ${esc(s.name)} – Flächen im Flugradius ${zahl(r)} km</h4>
     ${TRACHTFLAECHEN.map(([name, farbe], i) => [name, farbe, t.anteile[i]]).filter(x => x[2] > 0).sort((a, b) => b[2] - a[2]).map(([name, farbe, p]) => `<div class="klein-t"><span class="punkt" style="background:${farbe}"></span> ${name}: <b>${zahl(p)} %</b> · ca. ${zahl(p / 100 * ha, 0)} ha</div><div class="balken"><i style="width:${p}%;background:${farbe}"></i></div>`).join('')}
     <div class="klein-t leise" style="margin-top:6px">Nicht zugeordnet: ${zahl(rest)} %. Stand ${fmtD(t.datum)}, Quelle OpenStreetMap.</div>
-    <p class="klein-t">Raps wechselt jedes Jahr das Feld und ist in diesen Kartendaten fast nie erfasst. Was genau auf den Äckern steht, zeigt „🍯 Potenzial“ mit den Felddaten der AMA.</p></div>`;
+    <p class="klein-t">Raps wechselt jedes Jahr das Feld und ist in diesen Kartendaten fast nie erfasst. Was genau auf den Äckern steht, zeigt „🍯 Potenzial“ mit den Felddaten der AMA.</p>${extra}</div>`;
 }

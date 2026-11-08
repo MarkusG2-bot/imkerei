@@ -123,7 +123,7 @@ function swAbmelden() {
   if (!confirm('Vom Stockwaage-Server abmelden? Die Daten am Server bleiben.')) return;
   const k = swKonto();
   swAbruf('/api/app/abmelden', { method: 'POST' }).catch(() => {});
-  swKontoSetzen({ server: k.server, benutzer: k.benutzer }); swStaende = null; swAnsicht = 'liste'; render();
+  swKontoSetzen({ server: k.server, benutzer: k.benutzer }); satVergessen(false); swStaende = null; swAnsicht = 'liste'; render();
 }
 
 // ---------- Waage einrichten ----------
@@ -1082,9 +1082,11 @@ function swTeilenSeite() {
             ${f.stufe === 'standort' ? `<button style="margin-top:6px" onclick="swOrteSenden(true)">📍 Standorte jetzt übertragen</button>` : ''}
             ${f.stufe === 'ertrag' ? `<button style="margin-top:6px" onclick="swErtragSenden(true)">🍯 Ertragsdaten jetzt übertragen</button>` : ''}`
           : fehlt.length ? `<div class="klein-t leise">Zuerst „${esc(fehlt.join('“, „'))}“ erlauben.</div>`
-          : `<label class="klein-t" style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><input type="checkbox" id="sw-ok-${f.stufe}" style="width:auto">
+          : `${f.veraltet ? '<div class="klein-t"><b>Neue Fassung – bitte lesen und neu bestätigen</b></div>' : ''}
+            <label class="klein-t" style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><input type="checkbox" id="sw-ok-${f.stufe}" style="width:auto">
               Ich habe den Text gelesen und bin einverstanden, dass diese Daten gespeichert und so verwendet werden.</label>
             <button class="haupt" style="margin-top:6px" onclick="swFreigabe('${f.stufe}',true,${f.version})">Erlauben</button>
+            ${f.veraltet ? `<button style="margin-top:6px" onclick="swFreigabe('${f.stufe}',false)">Widerrufen</button>` : ''}
             ${f.widerrufen ? `<div class="klein-t leise">Widerrufen am ${swZeit(f.widerrufen)}</div>` : ''}`}
       </div>`; }).join(''));
   if (swTeilen == null) swNeuLaden(async () => { swTeilen = (await swAbruf('/api/app/freigaben')).freigaben; });
@@ -1094,11 +1096,14 @@ async function swFreigabe(stufe, an, version) {
   if (an && !$('#sw-ok-' + stufe)?.checked) { swFehler = 'Bitte zuerst das Häkchen „gelesen und einverstanden“ setzen.'; return render(); }
   const titel = swTeilen.find(x => x.stufe === stufe)?.titel;
   if (!an && !confirm(`„${titel}“ widerrufen?` + (stufe === 'standort' ? ' Die gespeicherten Standorte werden gelöscht, die Karte wird mit widerrufen.' :
-    stufe === 'ertrag' ? ' Die gespeicherten Ertragsdaten werden gelöscht.' : ''))) return;
+    stufe === 'ertrag' ? ' Die gespeicherten Ertragsdaten werden gelöscht.' :
+    stufe === 'satellit' ? ' Die gemeldeten Standplätze und alle Satellitenwerte am Server werden gelöscht.' : ''))) return;
   await swNeuLaden(async () => {
     swTeilen = (await swAbruf('/api/app/freigaben', { method: 'POST', body: JSON.stringify({ stufe, an, version }) })).freigaben;
     if (an && stufe === 'standort') await swOrteSenden();
     if (an && stufe === 'ertrag') await swErtragSenden();
+    if (an && stufe === 'satellit') { satSchreiben({ ...satStand(), frei: true, veraltet: false, ft: Date.now() }, satWiderrufe); await satMelden(true); }
+    if (!an && stufe === 'satellit') satVergessen();
   });
 }
 
@@ -1188,7 +1193,7 @@ async function swKontoLoeschen() {
   if (!confirm('Konto und alle Daten am Server wirklich endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
   try { await swAbruf('/api/app/konto-loeschen', { method: 'POST', body: JSON.stringify({ passwort: pw }) }); }
   catch (e) { swFehler = e.message; return render(); }
-  swKontoSetzen({ server: swKonto().server }); swAnsicht = 'liste'; swStaende = null; swFehler = ''; render();
+  swKontoSetzen({ server: swKonto().server }); satVergessen(false); swAnsicht = 'liste'; swStaende = null; swFehler = ''; render();
 }
 
 // Betreiber: Konten verwalten, Karte ein/aus und Unschärfe, Auswertung der geteilten Daten
@@ -1217,10 +1222,11 @@ function swBetriebSeite() {
         <p class="klein-t">Im Streitfall: Benutzername und E-Mail, wie der frühere Kunde sie nennt. Aufbewahrt 3 Jahre, ohne Namen.</p>
         <label>Benutzername<input id="sw-nb" autocapitalize="none"></label><label>E-Mail<input id="sw-ne" type="email"></label>
         <button style="margin-top:8px" onclick="swNachweiseSuchen()">Suchen</button><div id="sw-nachweise" class="klein-t"></div></div>
+      ${swSatKarte(b.satellit)}
     </div>
-    <h3>Konten</h3>` + tabelle(['Benutzer', 'Name', 'Rolle', 'Stände', 'Seit', ''], b.kunden.map(x => [
+    <h3>Konten</h3>` + tabelle(['Benutzer', 'Name', 'Rolle', 'Stände', 'Satellit', 'Seit', ''], b.kunden.map(x => [
       esc(x.benutzer) + (x.gesperrt ? ' ' + marke('gesperrt', 'rot') : ''), esc(x.name || '') + (x.email ? `<div class="klein-t leise">${esc(x.email)}</div>` : ''),
-      x.rolle === 'betreiber' ? 'Betreiber' : 'Kunde', x.staende, x.angelegt ? fmtD(new Date(x.angelegt).toISOString().slice(0, 10)) : '',
+      x.rolle === 'betreiber' ? 'Betreiber' : 'Kunde', x.staende, swSatKunde(b.satellit, x.id), x.angelegt ? fmtD(new Date(x.angelegt).toISOString().slice(0, 10)) : '',
       x.id === swKonto().konto?.id ? '<span class="leise klein-t">du</span>' :
         `<button class="klein" onclick="swKundeTun(${x.id},'passwort')">🔑 neues Passwort</button>
          <button class="klein" onclick="swKundeTun(${x.id},'${x.gesperrt ? 'freigeben' : 'sperren'}')">${x.gesperrt ? '🔓 freigeben' : '🔒 sperren'}</button>
@@ -1229,7 +1235,76 @@ function swBetriebSeite() {
 }
 async function swBetriebLaden() {
   swBetrieb = { kunden: (await swAbruf('/api/app/betrieb/kunden')).kunden, karte: await swAbruf('/api/app/betrieb/karte'),
-    angaben: (await swAbruf('/api/app/betrieb/angaben').catch(() => ({}))).angaben };
+    angaben: (await swAbruf('/api/app/betrieb/angaben').catch(() => ({}))).angaben,
+    satellit: await swAbruf('/api/app/betrieb/satellit').catch(() => null) };
+}
+// Satellit (Betreiber): Verbrauch, Stufe, Standplätze ohne Koordinaten, Sentinel-1, Geschichte neu
+const SW_SAT_STUFE = { frei: 'frei – alles wird geholt', sparen: 'sparen – nur noch die laufende Saison, keine Geschichte und kein Sentinel-1',
+  stopp: 'stopp – nichts mehr bis zum 1. des nächsten Monats' };
+const SW_SAT_STATUS = { aktiv: 'fertig', geschichte: 'in Geschichte', wartet: 'wartet', fehler: 'Fehler' };
+function swSatKarte(d) {
+  if (d == null) return `<div class="karte"><h4>Satellit</h4><p class="klein-t leise">Satellit am Server nicht verfügbar.</p></div>`;
+  const v = d.verbrauch || {}, s = d.standplaetze || {}, proz = Math.round((v.anteil || 0) * 100);
+  const [j, m] = String(v.monat || '').split('-');
+  return `<div class="karte"><h4>Satellit</h4>
+    <div class="klein-t">Verbrauch ${m ? +m + '/' + j : ''}: ${zahl(v.pu || 0, 0)} PU von ${zahl(v.pu_monat || 0, 0)} (${proz} %), ${zahl(v.abfragen || 0)} Abfragen</div>
+    <div class="klein-t">Stufe: ${esc(SW_SAT_STUFE[d.stufe] || d.stufe || '–')}</div>
+    ${v.voll ? `<div class="klein-t rot">Kontingent erschöpft gemeldet</div>` : ''}
+    <div class="klein-t">Standplätze: ${s.gesamt || 0} gesamt · ${s.geschichte || 0} in Geschichte · ${s.fertig || 0} fertig · ${s.wartet || 0} wartet${s.fehler ? ` · ${s.fehler} Fehler` : ''}</div>
+    ${(d.fehler || []).length ? `<ul class="hinweise klein-t">${d.fehler.slice(0, 5).map(f => `<li>${swZeit(f.zeit)}: ${esc(f.text)}</li>`).join('')}</ul>` : ''}
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" style="width:auto" ${d.sentinel1 ? 'checked' : ''} onchange="swSatS1(this.checked)"> Sentinel-1 (Radar) nutzen</label>
+    ${swSatS1Felder(d.s1)}
+    ${(d.liste || []).length ? tabelle(['Benutzer', 'Status', 'Radius', 'Geschichte bis', ''], d.liste.map(x => [esc(x.benutzer || '–'),
+      esc(SW_SAT_STATUS[x.status] || x.status), x.r_km + ' km', x.geschichte_bis ? fmtD(x.geschichte_bis) : '–',
+      `<button class="klein" onclick="swSatGeschichte(${x.nr})">Geschichte neu</button>`])) : '<div class="klein-t leise">Noch keine Standplätze gemeldet.</div>'}
+  </div>`;
+}
+// Zelle in der Konten-Tabelle: Grenze (Standplätze) und Geschichte-Jahre je Kunde
+function swSatKunde(d, id) {
+  const k = d?.kunden?.find(x => x.id === id);
+  if (!k) return '–';
+  return `<label class="klein-t">Standplätze<input type="number" min="0" max="100" step="1" style="width:60px" value="${k.grenze}" onchange="swSatGrenze(${id},this.value)"></label>
+    <label class="klein-t">Jahre<input type="number" min="0" max="5" step="1" style="width:50px" value="${k.geschichte_jahre}" onchange="swSatJahre(${id},this.value)"></label>
+    <span class="klein-t leise">${k.anzahl} gemeldet</span>`;
+}
+const swSatKundeSetzen = (id, wert) => swNeuLaden(async () => { await swAbruf(`/api/app/betrieb/kunde/${id}/satellit`, { method: 'POST', body: JSON.stringify(wert) }); await swBetriebLaden(); });
+// Nur ganze Zahlen ab 0 senden; leer oder ungültig → nichts senden, Hinweis, der bisherige Wert bleibt (leer ≠ 0)
+function swSatKundeZahl(id, name, wert) {
+  const roh = String(wert ?? '').trim();
+  if (!/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; render(); return; }
+  return swSatKundeSetzen(id, { [name]: Number(roh) });
+}
+function swSatGrenze(id, wert) { return swSatKundeZahl(id, 'grenze', wert); }
+function swSatJahre(id, wert) { return swSatKundeZahl(id, 'geschichte_jahre', wert); }
+function swSatS1(an) {
+  return swNeuLaden(async () => { await swAbruf('/api/app/betrieb/satellit', { method: 'POST', body: JSON.stringify({ sentinel1: an }) }); await swBetriebLaden(); });
+}
+// Sentinel-1 sparen (Betreiber): jede Einstellung kann die Zahl der Radarbilder nur senken; Standard = alles wie geplant
+function swSatS1Felder(s) {
+  if (!s) return '';
+  const wahl = (n, opt) => `<select onchange="swSatS1Setzen('${n}',this.value)">${opt.map(([w, t]) => `<option value="${w}"${s[n] === w ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+  return `<details class="klein-t"><summary>Sentinel-1 sparen</summary>
+    <label>Bahn ${wahl('s1_bahn', [['alle', 'alle Überflüge'], ['eine', 'nur eine Bahnrichtung']])}</label>
+    <div class="leise">Eine Bahnrichtung: etwa halb so viele Bilder, die Radarwerte sind besser vergleichbar.</div>
+    <label>Höchstens <input type="number" min="0" max="1000" step="1" style="width:70px" value="${s.s1_max_jahr}" onchange="swSatS1Setzen('s1_max_jahr',this.value)"> Bilder je Standplatz und Jahr</label>
+    <div class="leise">0 = unbegrenzt; nur gespeicherte Bilder zählen, Fehlversuche nicht.</div>
+    <label>Geschichte <input type="number" min="0" max="5" step="1" style="width:50px" value="${s.s1_jahre}" onchange="swSatS1Setzen('s1_jahre',this.value)"> Jahre</label>
+    <div class="leise">Wie viele vergangene Saisonen Radar bekommen; die laufende Saison immer.</div>
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" style="width:auto" ${s.s1_nur_mahdsaison ? 'checked' : ''} onchange="swSatS1Setzen('s1_nur_mahdsaison',this.checked)"> Lücken nur Mai–September füllen</label>
+    <label>Schnitte bestätigen ${wahl('s1_bestaetigung', [['alle', 'alle'], ['unscharf', 'nur unscharfe']])}</label>
+    <div class="leise">Nur unscharfe: nur Schnitte, deren Datum um mehr als 4 Tage unsicher ist, und dann je ein Bild davor und danach.</div>
+    <div class="leise">Wer eine Einstellung später lockert, holt schon erledigte Zeiträume nicht nach – das geht nur über „Geschichte neu“ (kostet Kontingent). Ausnahme: „Jahre“ vergrößern holt nach.</div>
+  </details>`;
+}
+function swSatS1Setzen(name, wert) {
+  const zahlFeld = name === 's1_max_jahr' || name === 's1_jahre', roh = String(wert ?? '').trim();
+  if (zahlFeld && !/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; render(); return; }   // leer ≠ 0 (unbegrenzt)
+  const w = zahlFeld ? Number(roh) : wert;
+  return swNeuLaden(async () => { await swAbruf('/api/app/betrieb/satellit', { method: 'POST', body: JSON.stringify({ [name]: w }) }); await swBetriebLaden(); });
+}
+async function swSatGeschichte(nr) {
+  if (!confirm('Alle Satellitenwerte dieses Standplatzes löschen und die ganze Geschichte neu holen? Das kostet Kontingent (Rechen-Einheiten).')) return;
+  await swNeuLaden(async () => { await swAbruf('/api/app/betrieb/satellit/geschichte', { method: 'POST', body: JSON.stringify({ nr, bestaetigt: true }) }); await swBetriebLaden(); });
 }
 async function swKundeNeu() {
   const benutzer = $('#sw-kb').value.trim(), name = $('#sw-kn').value.trim(), email = $('#sw-ke').value.trim();

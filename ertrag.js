@@ -15,6 +15,7 @@ const NEKTAR = [
   ['klee', 'Klee', n => /KLEE/.test(n), 30, 100, [5, 9]],
   ['luzerne', 'Luzerne', n => /LUZERNE/.test(n), 20, 80, [6, 8]],
   ['esparsette', 'Esparsette', n => /ESPARSETTE/.test(n), 100, 200, [5, 6]],
+  ['feldfutter', 'Feldfutter (Gräser)', n => /FELDFUTTER|ACKERGRAS|WEIDELGRAS|FUTTERGRAS/.test(n), 0, 0, [5, 9]],
   ['ackerbohne', 'Ackerbohne', n => /ACKERBOHNE|PFERDEBOHNE/.test(n), 10, 30, [5, 6]],
   ['soja', 'Sojabohne', n => /SOJA/.test(n), 0, 10, [7, 7]],
   ['lein', 'Lein', n => /LEIN/.test(n), 5, 20, [6, 7]],
@@ -195,7 +196,7 @@ function waldText(w) {
 // ---------- Berechnung und Anzeige ----------
 let potEbene = null;
 // Laufzähler: Nachgeladenes (Boden, Wald) gilt nur, solange kein neuer Lauf (anderer Standplatz oder anderes Jahr) gestartet ist
-// und die Potenzial-Karte noch zu sehen ist (nicht von der Trachtkarte oder einer anderen Seite ersetzt)
+// und die Potenzial-Karte noch zu sehen ist (nicht von einer anderen Seite ersetzt; die Trachtkarte hat ihre eigene Kachel)
 let potLauf = 0;
 function potNachladen(lauf, feld, wert) {
   if (lauf !== potLauf || !$('#pot-karte')) return false;
@@ -206,6 +207,7 @@ const ernteAm = (s, jahr) => db.ernten.filter(e => e.produkt === 'Honig' && e.da
 async function potenzial(sid, jahr) {
   const lauf = ++potLauf, s = standort(sid), info = $('#tracht-info'), r = flugradius();
   if (!s || !hatKoord(s)) return;
+  const tk = $('#tracht-karte'); if (tk) tk.innerHTML = trachtKachel(s);
   const meldung = t => { const el = lauf === potLauf && $('#pot-info'); if (el) el.textContent = t; };
   info.innerHTML = '<div class="karte" style="margin-bottom:12px"><h4>Trachtpotenzial ' + esc(s.name) + '</h4><div class="leise" id="pot-info">Suche die neuesten Felddaten …</div></div>';
   const jahre = invekosJahre();
@@ -221,8 +223,13 @@ async function potenzial(sid, jahr) {
   const lse = await lseHolen(s, jahr, r, felder.nektarFlaechen);
   if (lauf !== potLauf) return;
   if (lse.length) { felder.kulturen[LSE_NAME] = lse.reduce((a, n) => a + n.ha, 0); felder.nektarFlaechen.push(...lse); }
-  potLetzt = { sid, jahr, r, felder, wetter, jahre };
+  // Satellit: zuerst der letzte Stand aus dem Zwischenspeicher (gleich welchen Alters), dann frisch vom Server
+  const satDa = typeof satAktiv === 'function' && satAktiv();
+  potLetzt = { sid, jahr, r, felder, wetter, jahre, sat: satDa ? satLetzt(sid, jahr) : null };
   potZeigen(true);
+  // Stand der Freigabe unbekannt: erst fragen; ist sie aus, gleich neu zeichnen (Hinweis statt Kachel)
+  if (satDa) satPruefen().then(an => an ? satHolen(sid, jahr) : null)
+    .then(a => (a || potLetzt?.sat || !satAktiv()) && potNachladen(lauf, 'sat', a));
   bodenHolen(felder.nektarFlaechen).then(b => potNachladen(lauf, 'boden', b));
   waldHolen(s.lat, s.lon, r).catch(() => null).then(w => potNachladen(lauf, 'wald', w));
 }
@@ -235,10 +242,9 @@ function umkreisSetzen(v) {
 }
 // Rechnet mit den zuletzt geladenen Feldern; neueKarte = Trachtflächen neu einzeichnen
 let potLetzt = null;
-function potZeigen(neueKarte) {
-  const { sid, jahr, r, felder, wetter, jahre, boden, wald } = potLetzt, s = standort(sid), info = $('#tracht-info');
-  if (!s || !info) return;
-  // Gruppensummen
+// Reiner Rechenkern (kein Speichern, kein DOM) – auch für Punkte ohne Standplatz (ohne s.id: keine eigenen Völker).
+// sat (Satellit-Auswertung): Wiesen- und Futter-Gruppen mit Faktor in sat.wiesenfaktor (ab 2 Jahren) → fb × wf; rest = Kulturen ohne nennenswerten Nektar
+function potRechnen(s, felder, wetter, r, sat = null) {
   const gruppen = {}, rest = {};
   for (const [name, ha] of Object.entries(felder.kulturen)) {
     const g = nektarGruppe(name, felder.codes?.[name]), [lo, hi] = g ? nektarWert(g) : [0, 0];
@@ -247,12 +253,40 @@ function potZeigen(neueKarte) {
   }
   // Nektarfaktor je Gruppe: Trockenheit, je Fläche angepasst an den Boden-Wasserspeicher
   const f = wetter?.faktor ?? 1;
-  const zeilen = Object.values(gruppen).map(x => { const [lo, hi] = nektarWert(x.g); return { ...x, lo, hi, min: x.ha * lo, max: x.ha * hi, fb: gruppenFaktor(felder.nektarFlaechen, x.g[0], f) }; }).sort((a, b) => b.max - a.max);
-  const min = zeilen.reduce((a, z) => a + z.min * z.fb, 0), max = zeilen.reduce((a, z) => a + z.max * z.fb, 0), mitte = (min + max) / 2;
-  const voelker = db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length;
+  const zeilen = Object.values(gruppen).map(x => {
+    const [lo, hi] = nektarWert(x.g), z = { ...x, lo, hi, min: x.ha * lo, max: x.ha * hi, fb: gruppenFaktor(felder.nektarFlaechen, x.g[0], f) };
+    const wf = sat?.wiesenfaktor?.[x.g[0]]?.faktor;   // Wiesen- bzw. Futterfaktor (Spec 8b), der Server liefert ihn nur für Mahd-Gruppen mit Nektar
+    if (typeof wf === 'number') { z.fb *= wf; z.wf = wf; }
+    return z;
+  }).sort((a, b) => b.max - a.max);
+  const min = zeilen.reduce((a, z) => a + z.min * z.fb, 0), max = zeilen.reduce((a, z) => a + z.max * z.fb, 0);
+  // E13: flächengewichtetes Mittel der angewandten Wiesen- und Futterfaktoren
+  const mitWf = zeilen.filter(z => z.wf != null), wfHa = mitWf.reduce((a, z) => a + z.ha, 0);
+  const wiesenfaktor = wfHa > 0 ? Math.round(mitWf.reduce((a, z) => a + z.ha * z.wf, 0) / wfHa * 100) / 100 : null;
+  const voelker = s.id ? db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length : 0;
   // Alle Völker im Flugradius (deine eingeschlossen): eigene Angabe oder Schätzung aus der Völkerdichte
   const schaetzung = Math.round(voelkerdichte() * Math.PI * r * r), umkreis = Math.max(voelker, s.voelkerUmkreis ?? schaetzung, 1);
-  (s.potenzial ??= {})[jahr] = { min: Math.round(min), max: Math.round(max), faktor: +f.toFixed(2), spei: wetter?.art === 'spei' ? Math.round(wetter.spei90 * 10) / 10 : null, radius: r, datum: heute() }; speichern();
+  return { zeilen, rest, min, max, f, voelker, schaetzung, umkreis, wiesenfaktor };
+}
+// Kachel unter dem Potenzial: gespeicherte Trachtkarte oder Knopf zum Laden (OpenStreetMap). Braucht trachtInfo aus zusatz.js (zur Laufzeit).
+function trachtKachel(s) {
+  const knopf = text => `<button class="klein" onclick="trachtkarte('${s.id}')">${text}</button>`;
+  return s.trachtkarte ? trachtInfo(s, `<div class="zeile" style="margin-top:6px">${knopf('Trachtkarte neu laden')}</div>`)
+    : `<div class="karte" style="margin-bottom:12px"><h4>Trachtkarte ${esc(s.name)}</h4><p class="leise klein-t">Flächenanteile aus OpenStreetMap im Flugradius</p>${knopf('Trachtkarte laden')}</div>`;
+}
+function potZeigen(neueKarte) {
+  const { sid, jahr, r, felder, wetter, jahre, boden, wald, sat = null } = potLetzt, s = standort(sid), info = $('#tracht-info');
+  if (!s || !info) return;
+  const { zeilen, rest, min, max, f, voelker, schaetzung, umkreis, wiesenfaktor } = potRechnen(s, felder, wetter, r, sat), mitte = (min + max) / 2;
+  (s.potenzial ??= {})[jahr] = { min: Math.round(min), max: Math.round(max), faktor: +f.toFixed(2), spei: wetter?.art === 'spei' ? Math.round(wetter.spei90 * 10) / 10 : null, radius: r, datum: heute(), wiesenfaktor }; speichern();
+  // Satellit: echtes Blühfenster der Gelb-Gruppen, Wiesenzeilen (Faktor oder vorläufig); ohne Anmeldung einmal der Hinweis
+  const SAT_GELB = ['raps', 'sonnenblume', 'phacelia'], mitSat = typeof satAktiv === 'function';
+  const fenster = g => SAT_GELB.includes(g) ? sat?.bluete?.find(b => b.gruppe === g && b.hoehepunkt) : null;
+  // Wiesen: „Wiesen: …“ mit dem Gruppennamen dahinter; Futter-Gruppen mit ihrem Namen vorn (Futterfaktor)
+  const wiesen = zeilen.filter(z => sat?.wiesenfaktor?.[z.g[0]]).map(z => z.g[0].startsWith('wiese')
+    ? `<li>${wiesenText(sat.wiesenfaktor[z.g[0]])} <span class="leise klein-t">(${esc(z.g[1])})</span></li>` : `<li>${wiesenText(sat.wiesenfaktor[z.g[0]], esc(z.g[1]))}</li>`);
+  const blueteText = z => { const b = fenster(z.g[0]); return b ? `${satFensterText(b)}<div class="leise klein-t">Satellit${b.vermutet ? ', vermutet' : ''}</div>`
+    : z.g[5][0] === z.g[5][1] ? MONAT[z.g[5][0]] : `${MONAT[z.g[5][0]]}–${MONAT[z.g[5][1]]}`; };
   // Abgleich mit den eigenen Ernten an diesem Standplatz
   const vergleich = Object.entries(s.potenzial).map(([j, p]) => ({ j, p, kg: ernteAm(s, j) })).filter(x => x.kg > 0).sort((a, b) => b.j.localeCompare(a.j));
   const anteile = vergleich.map(x => x.kg / ((x.p.min + x.p.max) / 2)), erfahrung = anteile.length ? anteile.reduce((a, b) => a + b, 0) / anteile.length : null;
@@ -276,13 +310,15 @@ function potZeigen(neueKarte) {
       : '<p class="leise klein-t">Weder Dürreindex noch Niederschlagsdaten erreichbar – ohne Trockenheitsfaktor gerechnet.</p>'}
     <h4 style="margin-top:12px">Trachtflächen laut AMA ${jahr}</h4>` +
     tabelle(['Tracht', 'Fläche', 'Blüte', 'Richtwert', 'Potenzial'], zeilen.map(z => [`<b>${esc(z.g[1])}</b><div class="leise klein-t">${esc([...z.namen].join(', ').toLowerCase())}</div>`, zahl(z.ha, 1) + ' ha',
-      z.g[5][0] === z.g[5][1] ? MONAT[z.g[5][0]] : `${MONAT[z.g[5][0]]}–${MONAT[z.g[5][1]]}`, `${z.lo}–${z.hi} kg/ha`, `${zahl(z.min * z.fb, 0)}–${zahl(z.max * z.fb, 0)} kg`])) +
-    `${felder.nektarFlaechen.length ? `<p class="leise klein-t">${boden === undefined ? 'Bodenkarte wird geladen …' : bodenText(boden)}</p>` : ''}
+      blueteText(z), `${z.lo}–${z.hi} kg/ha`, `${zahl(z.min * z.fb, 0)}–${zahl(z.max * z.fb, 0)} kg`])) +
+    `${wiesen.length ? `<ul class="hinweise" style="margin-top:10px">${wiesen.join('')}</ul>` : ''}
+    ${mitSat ? (satAktiv() ? satKachel(sat, sid, r) : `<p class="leise klein-t">${satHinweis()}.</p>`) : ''}
+    ${felder.nektarFlaechen.length ? `<p class="leise klein-t">${boden === undefined ? 'Bodenkarte wird geladen …' : bodenText(boden)}</p>` : ''}
     ${wald ? `<p class="leise klein-t">${waldText(wald)}</p>` : ''}
     <p class="klein-t">Ohne nennenswerten Nektar: ${zahl(restHa, 0)} ha${restTop.length ? ` (${restTop.map(([n, ha]) => `${n.toLowerCase()} ${zahl(ha, 0)} ha`).join(', ')} …)` : ''}. Auf der Karte sind die Trachtflächen gelb markiert.</p>
     ${swTracht(s, jahr)}${vergleich.length ? '<h4>Abgleich mit deinen Ernten an diesem Standplatz</h4>' + tabelle(['Jahr', 'Potenzial', 'Deine Ernte', 'Anteil'], vergleich.map((x, i) => [x.j, `${zahl(x.p.min, 0)}–${zahl(x.p.max, 0)} kg`, zahl(x.kg, 1) + ' kg', zahl(anteile[i] * 100, 0) + ' %']))
       : '<p class="leise klein-t">Sobald Honigernten mit diesem Standplatz eingetragen sind, vergleicht die App sie mit dem Potenzial des jeweiligen Jahres (Jahr oben wählen und berechnen) und schätzt daraus deinen Ertrag.</p>'}
-    <p class="leise klein-t">So ist gerechnet: Fläche je Kultur × Honig-Richtwert je Hektar × Nektarfaktor aus der Trockenheit (Dürreindex SPEI, sonst Niederschlag), je Fläche angepasst an den Wasserspeicher des Bodens. Die Richtwerte sind Faustzahlen aus der Literatur und schwanken stark nach Sorte, Boden und Jahr – unter ⚙ Anpassen kannst du sie ändern. Das Potenzial ist die Menge, die die Flächen bestenfalls liefern; was die Völker selbst brauchen und was fremde Völker holen, ist nicht abgezogen. Wald (Honigtau), Gärten und Straßenbäume sind nicht enthalten${wald ? ' – der Waldanteil steht oben nur zur Einordnung, dazu die Trachtkarte' : ''}. INVEKOS Schläge ${jahr} (CC BY 4.0). ${QUELLEN}.</p></div>`;
+    <p class="leise klein-t">So ist gerechnet: Fläche je Kultur × Honig-Richtwert je Hektar × Nektarfaktor aus der Trockenheit (Dürreindex SPEI, sonst Niederschlag), je Fläche angepasst an den Wasserspeicher des Bodens. Die Richtwerte sind Faustzahlen aus der Literatur und schwanken stark nach Sorte, Boden und Jahr – unter ⚙ Anpassen kannst du sie ändern. Das Potenzial ist die Menge, die die Flächen bestenfalls liefern; was die Völker selbst brauchen und was fremde Völker holen, ist nicht abgezogen. Wald (Honigtau), Gärten und Straßenbäume sind nicht enthalten${wald ? ' – der Waldanteil steht oben nur zur Einordnung, dazu die Trachtkarte' : ''}. INVEKOS Schläge ${jahr} (CC BY 4.0). ${QUELLEN}.${sat ? ' ' + satQuelle(sat) + '.' : ''}</p></div>`;
 }
 
 // ---------- Richtwerte unter „Anpassen“ ----------

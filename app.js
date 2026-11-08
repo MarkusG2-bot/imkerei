@@ -1,5 +1,5 @@
 // ---------- Daten ----------
-const VERSION = '1.3.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
+const VERSION = '1.4.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
 const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [], fuetterungen: [], fuetterRunden: [] });
 let db = laden();
@@ -204,11 +204,12 @@ function formular(titel, felder, werte, onSave, onDelete) {
   dlg.showModal();
 }
 
-function bearbeiten(typ, id, vorgabe = {}) {
+// danach: statt render() nach dem Speichern aufgerufen (z. B. Standplatz suchen → Seite Standplätze)
+function bearbeiten(typ, id, vorgabe = {}, danach) {
   const def = DEF[typ];
   const alt = id && db[typ].find(x => x.id === id);
   formular(alt ? `${def.titel} bearbeiten` : `${def.titel} eintragen`, def.felder(), alt || { ...def.neu?.(), ...vorgabe },
-    w => { const e = alt ? Object.assign(alt, w) : { id: uid(), ...w }; if (!alt) db[typ].push(e); def.nachher?.(e); speichern(); render(); },
+    w => { const e = alt ? Object.assign(alt, w) : { id: uid(), ...w }; if (!alt) db[typ].push(e); def.nachher?.(e); speichern(); danach ? danach(e) : render(); },
     alt && (() => { db[typ] = db[typ].filter(x => x.id !== id); def.geloescht?.(id); speichern(); if (typ === 'voelker') detailVolk = null; render(); }));
   if (typ === 'durchsichten') { sprachLeiste(); if (typeof swDurchsichtKurz === 'function') swDurchsichtKurz(); }   // Waage: Kurztext der letzten 7 Tage
 }
@@ -218,12 +219,13 @@ const ANSICHTEN = [['start', 'Übersicht'], ['standorte', 'Standplätze'], ['voe
 let ansicht = 'start', detailVolk = null, vegId = null, karte = null;
 function gehe(a) { ansicht = a; detailVolk = null; render(); scrollTo(0, 0); }
 function render() {
-  // Menü in der unter „Anpassen“ gewählten Reihenfolge; die offene Seite bleibt sichtbar, auch wenn sie ausgeblendet ist
-  $('#nav').innerHTML = geordnet('menue', true).filter(t => t.an || t.k === ansicht).map(t => `<button class="${t.k === ansicht ? 'aktiv' : ''}" onclick="gehe('${t.k}')">${t.label}</button>`).join('');
+  // Menü in der unter „Anpassen“ gewählten Reihenfolge; die offene Seite bleibt sichtbar, auch wenn sie ausgeblendet ist (Standplatz suchen gehört zu Standplätze)
+  const menueAktiv = ansicht === 'suche' ? 'standorte' : ansicht;
+  $('#nav').innerHTML = geordnet('menue', true).filter(t => t.an || t.k === menueAktiv).map(t => `<button class="${t.k === menueAktiv ? 'aktiv' : ''}" onclick="gehe('${t.k}')">${t.label}</button>`).join('');
   uhrLeiste();
   if (karte) { karte.remove(); karte = null; }
   ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen,
-    vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, stockwaage: zeigeStockwaage, daten: zeigeDaten, einstellungen: zeigeEinstellungen })[ansicht]();
+    vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, stockwaage: zeigeStockwaage, daten: zeigeDaten, einstellungen: zeigeEinstellungen, suche: zeigeSuche })[ansicht]();
 }
 const main = () => $('#main');
 const kopf = (titel, knoepfe = '') => `<div class="kopf"><h2>${titel}</h2><div class="zeile">${knoepfe}</div></div>`;
@@ -315,18 +317,19 @@ function zeigeStart() {
 const hatKoord = s => s.lat != null && s.lon != null;
 const beutenAm = s => [...new Set(db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').map(v => v.beute))];
 function zeigeStandorte() {
-  main().innerHTML = kopf('Standplätze', `<button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
+  main().innerHTML = kopf('Standplätze', `<button onclick="gehe('suche')">🔍 Standplatz suchen</button><button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
     `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button><button id="sperr-knopf" onclick="sperrEintragen()">⚠ Sperrzone</button>
      <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input type="number" min="0.5" max="10" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)" style="width:72px"> km</label>
      <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = ${zahl(flugradius())} km Flugradius.</span></div>
-    <div id="karte"></div><div id="tracht-info"></div>` +
+    <div id="karte"></div><div id="tracht-info"></div><div id="tracht-karte"></div>` +
     (aktiveZonen().length ? `<ul class="hinweise" style="margin-bottom:12px">${sperrHinweise().map(([f, t]) => `<li class="${f}">${t}</li>`).join('') || `<li>${aktiveZonen().length} aktive Sperrzone(n) eingetragen – keiner deiner Standplätze liegt darin.</li>`}</ul>` : '') +
     tabelle(['Name', 'Art', 'Völker', 'Koordinaten', 'Reg.-Nr.', 'Tracht', ''], db.standorte.map(s => [
       `<b>${esc(s.name)}</b>${s.notiz ? `<div class="leise klein-t">${esc(s.notiz)}</div>` : ''}`, esc(s.typ),
       db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length,
       hatKoord(s) ? `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : marke('fehlen', 'gelb'), esc(s.regnr), esc(s.tracht),
-      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="trachtkarte('${s.id}')">Trachtkarte</button><button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`])) + sperrListeHtml();
+      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`])) + sperrListeHtml();
   $('#ortsuche').onkeydown = e => { if (e.key === 'Enter') ortSuchen(); };
+  satMelden().catch(() => {});   // vor der Karte, damit es auch ohne Leaflet läuft; höchstens einmal je Stunde
   if (!window.L) { $('#karte').outerHTML = '<p class="leer">Karte nicht verfügbar (keine Internetverbindung). Koordinaten können von Hand eingetragen werden.</p>'; return; }
   karte = L.map('karte').setView([47.6, 14.1], 7);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(karte);
@@ -335,7 +338,10 @@ function zeigeStandorte() {
     const n = db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length;
     const kreis = L.circle([s.lat, s.lon], { radius: flugradius() * 1000, color: '#e0a100', weight: 1, fillOpacity: 0.06, interactive: false }).addTo(karte);
     const m = L.marker([s.lat, s.lon], { draggable: true }).addTo(karte).bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.typ)} · ${n} Völker`);
-    m.on('dragend', () => { const p = m.getLatLng(); s.lat = +p.lat.toFixed(5); s.lon = +p.lng.toFixed(5); kreis.setLatLng(p); speichern(); });
+    // > 500 m verschoben: Satellitengeschichte am Server neu – nur nach Rückfrage, sonst Marker zurück
+    m.on('dragend', () => { const p = m.getLatLng(), lat = +p.lat.toFixed(5), lon = +p.lng.toFixed(5);
+      if (!satOrtOk(s, lat, lon)) return m.setLatLng([s.lat, s.lon]);
+      s.lat = lat; s.lon = lon; kreis.setLatLng(p); speichern(); satMelden().catch(() => {}); });
     punkte.push([s.lat, s.lon]);
   }
   if (punkte.length) karte.fitBounds(punkte, { maxZoom: 13, padding: [40, 40] });
@@ -704,7 +710,7 @@ function arbeitenHtml(s, d) {
   return `<div class="kopf" style="margin-top:20px"><h3 style="margin:0">Wichtige Arbeiten im Jahreslauf</h3>
       <select style="width:auto" onchange="vegBeute=this.value;render()">${BEUTEN.map(b => `<option value="${b}" ${b === beute ? 'selected' : ''}>${b}${da.includes(b) ? ' ●' : ''}</option>`).join('')}</select></div>` +
     tabelle(['Arbeit', 'Zeigerpflanze / Zeitpunkt', 'Stand'], meilensteine(beute, d, heute(), standortFaktor(beobAm(s)).k).map(m => [
-      `<b>${esc(m.titel)}</b><div class="klein-t ${m.stand === 'jetzt' ? '' : 'leise'}">${esc(m.text)}</div>`, esc(m.pflanze),
+      `<b>${esc(m.titel)}</b><div class="klein-t ${m.stand === 'jetzt' ? '' : 'leise'}">${esc(m.text)}</div>`, esc(m.pflanze) + rapsHinweis(s, m),
       marke(m.stand === 'jetzt' ? 'jetzt fällig' : m.stand === 'kommt' ? m.wann : 'vorbei', farbe[m.stand]) + (m.empf ? `<div class="klein-t">${esc(m.empf.text)}</div>` : '')])) +
     '<p class="leise klein-t">● = Beutentyp steht an diesem Standplatz. Zeitpunkte sind Richtwerte aus Wärmesumme und Wettervorhersage – die eigene Beobachtung am Volk geht vor.</p>';
 }
@@ -725,6 +731,7 @@ async function zeigeVegetation() {
       <div class="karte"><div class="leise klein-t">Aktuell</div><h4>${wetterText(d.jetzt.code)} ${zahl(d.jetzt.temp)} °C</h4>Luftfeuchte ${zahl(d.jetzt.feuchte, 0)} % · Wind ${zahl(d.jetzt.wind, 0)} km/h</div>
       <div class="karte"><div class="leise klein-t">Grünlandtemperatursumme</div><h4>${zahl(d.gts, 0)}</h4>${d.beginn ? `Vegetationsbeginn (200) am ${fmtD(d.beginn)}` : `noch ${zahl(200 - d.gts, 0)} bis Vegetationsbeginn`}${d.fehlend ? `<div class="leise klein-t">${d.fehlend} Tage ohne Messwert</div>` : ''}<div class="leise klein-t">${waermeQuelleText(d)}</div></div>
       <div class="karte"><div class="leise klein-t">Phänologische Jahreszeit</div><h4>${esc(p.name)}</h4><span class="klein-t">Zeigerpflanzen: ${esc(p.zeiger)}</span></div></div>
+    <div id="veg-sat"></div>
     <ul class="hinweise" style="margin-top:12px"><li class="gruen"><b>Am Bienenstand jetzt:</b> ${esc(p.tipp)}</li></ul>
     ${arbeitenHtml(s, d)}
     <h3>Flugwetter – 7 Tage</h3><div class="tage">${d.tage.map(t => { const f = flug(t); return `<div class="karte"><div class="klein-t">${new Date(t.datum).toLocaleDateString('de-AT', { weekday: 'short', day: 'numeric', month: 'numeric' })}</div><div class="gross">${wetterText(t.code).split(' ')[0]}</div>
@@ -737,6 +744,11 @@ async function zeigeVegetation() {
     <svg class="diagramm" viewBox="0 0 ${Math.max(n, 2)} 200" preserveAspectRatio="none"><line x1="0" x2="${n}" y1="${y(200)}" y2="${y(200)}" stroke="#3d8b40" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
       <polyline fill="none" stroke="#e0a100" stroke-width="2.5" vector-effect="non-scaling-stroke" points="${d.verlauf.map((v, i) => `${i},${y(v).toFixed(1)}`).join(' ')}"/></svg>
     <p class="leise klein-t">Gestrichelt: Schwelle 200 (Vegetationsbeginn). ${QUELLEN}. Standort ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}.</p>`;
+  // Satellit nachladen; ohne Anmeldung/Freigabe liefert satHolen null → Kachel bleibt leer
+  const j = +heute().slice(0, 4), seite = $('#veg-sat');
+  const [a, vj] = await Promise.all([satHolen(s.id, j), satHolen(s.id, j - 1)]);
+  if (ansicht !== 'vegetation' || $('#veg-sat') !== seite) return;
+  seite.innerHTML = satVegKachel(a, vj);
 }
 
 // ---------- Daten ----------
