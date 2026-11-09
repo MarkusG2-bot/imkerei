@@ -2,6 +2,64 @@
 
 Neueste Version oben. Die Version steht in der App oben neben „Imkerei“.
 
+## Version 1.5.0 · 09.11.2026 · Stufen, Waldtracht, Karte, Flugradius 3 km
+Geänderte Dateien: stufe.js (neu), waldtracht.js (neu), stockwaage.js, satellit.js, ertrag.js, app.js, anpassen.js, zusatz.js, suche.js, sperrzonen.js, fuetter.js, index.html, sw.js, style.css. Stand vor der Änderung: Ordner sicherung-1.4.0 (in Imkerei-sicherungen).
+
+**Karte und Flugradius**
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Die Zoom-Knöpfe der Karte schieben sich beim Rollen über die Menüleiste | Die Karte ist eine eigene Ebene: Beim Rollen verschwinden „+“ und „−“ unter der Kopfzeile. Popups und Beschriftungen liegen weiter über der Karte. |
+| Nicht bei jedem Tippen auf die Karte ein neuer Standplatz | Standplätze → Knopf „📍 Auf der Karte setzen“ (neben „+ Standplatz“). Erst danach öffnet ein Tippen auf die Karte das Formular „Standplatz eintragen“; der Knopf ist solange gelb, ein zweiter Druck bricht ab. Ohne den Knopf passiert beim Tippen nichts. „⚠ Sperrzone“ geht wie bisher, es ist immer nur einer der beiden Knöpfe aktiv. |
+| Feldangaben am Handy lesbar | Nach 🍯 Potenzial steht unter der Karte eine Zeile: Tippt man ein gelbes Feld an, steht dort z. B. „Winterraps · 2,35 ha · Boden: hoch“. Das angetippte Feld bekommt einen dunklen Rand. |
+| Felder genauer sehen | Die Felder haben einen dünnen braunen Rand. Nach 🍯 Potenzial füllt der Flugkreis die Karte. Ab dem näheren Heranzoomen steht in jedem Feld ab 0,5 ha der Name der Kultur (z. B. „Sonnenblumen“, „Hecke“) – nur im sichtbaren Ausschnitt, damit die App flüssig bleibt. |
+| Flugradius höchstens 3 km | Das Feld „Flugradius … km“ (Standplätze und ⚙ Anpassen) geht nur noch von 0,5 bis 3 km; eine größere Eingabe wird auf 3 gesetzt. War früher mehr gespeichert, rechnet die App ab jetzt mit 3 km (Kreis, Trachtkarte, Potenzial, Satellit, 🔍 Standplatz suchen). |
+
+**Stufen Normal / Pro / Waage / Max** (gilt für die Funktionen des Stockwaage-Servers – alles, was nur am Handy läuft, bleibt frei)
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Sehen, welche Stufe gilt | Oben neben der Versionsnummer steht klein die Stufe: „Normal“, „Pro bis 3.12.“, „Max bis 8.11.2027“, „Waage“ oder „Max · eigener Server“. Ohne Anmeldung am Stockwaage-Server steht „Normal“. |
+| Ohne Internet weiterarbeiten | Die App merkt sich die letzte Stufe vom Server (je Server und Benutzer) und fragt höchstens einmal je Stunde nach. Nach 7 Tagen ohne Antwort zeigt sie „Normal“ – am Handy Gespeichertes bleibt, nur Server-Funktionen sind dann gesperrt. |
+| Gesperrte Funktion erkennen statt Fehlermeldung | Braucht eine Funktion eine höhere Stufe, steht ein graues Schloss „🔒 Pro“ bzw. „🔒 Waage“ da (bei „📶 Stand verbinden“, „🔔 Meldungen“, „🗺 Karte“, den Ständen, beim Füttern und beim Satellit). Man bleibt angemeldet. Antippen erklärt die Wege: registrieren (30 Tage Pro zum Probieren), Stockwaage koppeln (1 Jahr Max inklusive), Betreiber fragen. „＋ Waage einrichten“ bleibt immer frei. |
+| Eine Seite für Anmelden und meine Stufe | Stockwaage → 👤 Konto & Stufe ersetzt die bisherige Anmelde- und Konto-Seite: Karte „Deine Stufe“ mit „gültig bis …“ und woher sie kommt („Probezeit“, „vom Betreiber gesetzt“, „1 Jahr durch deine Waage“), Knopf „↻ Beim Server nachfragen“, darunter Konto, Passwort ändern, Meine Daten, Konto löschen wie bisher. |
+| Selbst ein Konto anlegen | Auf „Konto & Stufe“ die Karte „Registrieren“: Benutzername, E-Mail, Passwort (mindestens 10 Zeichen), zwei Häkchen für Nutzungsbedingungen und Datenschutzerklärung (verlinkt auf die Seiten des Servers). Danach ist man gleich angemeldet mit 30 Tagen Pro. Bei einem Fehler bleiben die Eingaben stehen, nur das Passwort muss neu hinein. |
+| Rechtzeitig wissen, wann die Stufe abläuft | 14 Tage vorher steht oben auf der Stockwaage-Seite einmal am Tag eine gelbe Leiste „Deine Stufe Pro läuft am 3.12. ab“. |
+| Probezeit beim Satellit | In der Probezeit wertet der Server einen Standplatz aus; bei den übrigen steht „Satellit: In der Probezeit 1 Standplatz – mit Pro alle“. |
+| Eigener Server | In „Deine Stufe“ steht „Eigener Server – lizenziert für <Name>“ mit Link „Lizenz“; dort zeigt die App keine Schlösser. Ist der eigene Server noch nicht frei (z. B. „Waage meldet sich nicht“), steht der Text des Servers als gelber Hinweis da. |
+
+**Waldtracht erkennen und bestätigen** (braucht Anmeldung, Freigabe „Satellit“ und Stufe Pro)
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Sehen, ob es eine Waldtracht geben kann | Standplätze → 🍯 Potenzial: Kachel „Waldtracht“ mit Wetter-Ampel („Wetter-Rahmen günstig“, „offen“ oder „ungünstig“) und den fünf Wetter-Punkten als Kreise. Grün wird die Ampel nur, wenn für das Jahr Läuse am Baum eingetragen sind; sonst „Wetter-Rahmen günstig – Läuse am Baum prüfen“. Quelle: GeoSphere Austria (CC BY 4.0). |
+| Erkannte Waldtracht sehen | Die Kachel zeigt jede Phase, die die Waagen am Stand erkannt haben: „Waldtracht seit 24.6., bisher 18 kg je Volk (Massentracht)“ bzw. „Waldtracht 24.6.–12.7., 31 kg je Volk“. Zunahmen, die der Satellit erklärt (Raps, Wiesen), stehen klein dabei; bei einer Tracht wie im Vorjahr „evtl. Linde (Vorjahr)“. Zu wenig Nadelwald oder keine Waage am Standplatz: eine Zeile mit dem Grund. |
+| Bestätigen, ob es Waldtracht war | Bei jeder Phase drei Knöpfe: „Ja, Waldtracht“, „Nein“, „Andere Tracht“ (fragt nach der Tracht). Die Antwort geht an den Server, er lernt daraus; sie lässt sich bis Jahresende ändern. |
+| Nach „Ja“ nichts vergessen | „Ja, Waldtracht“ trägt bei jedem Volk mit Waage am Stand in die Stockkarte „Waldtracht ab 24.06.2026“ ein (ohne Doppel, zählt nicht als Durchsicht) und legt einmal die Aufgabe „Waldhonig prüfen – <Standplatz>“ an. |
+| Zementhonig rechtzeitig erkennen | Nehmen zwei Völker an einem Tag stark zu (oder bei Hitze und Trockenheit), steht „Zementhonig-Verdacht seit 28.6. (6,5 kg) – jetzt schleudern prüfen“ mit „Ja, Melezitose“ / „Nein“. |
+| Ernte eintragen | Nach „Ja“ öffnet „In Ernte übernehmen“ das Ernte-Formular mit Sorte „Waldhonig“ (bzw. „Melezitosehonig“), Standplatz, heute und kg je Volk × Völker als Vorschlag. Die Menge geht nur mit Freigabe „Ertragsdaten“ an den Server; sonst steht „Freigabe Ertragsdaten nötig“ und die Ernte bleibt am Handy. |
+| Läuse und Honigtau festhalten | Standplätze → „🌲 Beobachtung“: Läuse (keine / wenige / viele), Baum, Ameisenstraßen, Honigtau, schwarze Kolonien, Notiz. Bleibt am Handy; nur die Zusammenfassung des Jahres geht an den Server. |
+| Ans Läuse-Prüfen erinnert werden | Für Standplätze mit Waage und mindestens 20 % Nadelwald legt die App je Jahr die Aufgabe „Zweige auf Läuse prüfen – <Standplatz>“ zum 25.4. und 10.12. an (je nur einmal). Abschaltbar unter ⚙ Anpassen. |
+| Push-Meldungen verstehen | Stockwaage → Meldungen kennt „Waldtracht erkannt“, „Waldtracht zu Ende“ und „Zementhonig-Verdacht“. |
+| Wissen, was beim Widerruf bleibt | Die Rückfragen beim Widerrufen von „Satellit“ und „Ertragsdaten“ sagen jetzt, dass die Datensammlung vergröbert (Lage auf 1 km, ohne Name und Konto) bleibt. |
+
+**Satellit (Nachtrag)**
+
+| Wunsch | Umsetzung |
+|--------|-----------|
+| Weniger Fehlalarme ohne AMA-Liste | Im Jahr ohne AMA-Feldliste vermutet der Server nur noch **Raps**, und nur bei Äckern, die im März schon grün waren (bei Sonnenblume und Phacelia waren fast 9 von 10 Treffern falsch). Neu unter dem Potenzial: ab 1. Mai „Sommerkulturen: … ha – Art erst mit der AMA-Liste“ (zählen mit 0 kg/ha) und ab 1. August „Wintergetreide: … ha“, beide „(Satellit, vermutet)“. |
+| Standplatz-Meldung für die Waldtracht | Die App meldet je Standplatz jetzt auch den Waagen-Stand, den Waldanteil, die Beobachtungen des Jahres und die Höhe. Steht dieselbe Waage bei zwei Standplätzen, sagt die Kachel das. |
+
+Hinweise:
+- **Nach dem Update neu bestätigen:** Stockwaage → Daten teilen: „Satellit“ hat Fassung 3 (nennt GeoSphere und die Waldtracht-Erkennung), „Ertragsdaten“ Fassung 2. Bis zur neuen Bestätigung steht „Neue Fassung – bitte lesen und neu bestätigen“, und Satellit bzw. Waldtracht ruhen für dein Konto.
+- Stufen, Registrieren und Waldtracht brauchen den neuen Stand am Stockwaage-Server. Läuft dort noch der alte, zeigt die App überall „Normal“ ohne Schlösser und die Waldtracht-Kachel meldet den Fehler des Servers.
+- Der Server entscheidet über die Stufe, die App zeigt nur an. Ohne Anmeldung („Normal“) bleibt die App wie bisher; beim Abmelden oder wenn eine Stufe abläuft, verschwindet am Handy nichts.
+- Abmelden oder Widerruf „Satellit“ löscht am Handy auch die gemerkten Waldtracht-Werte; die Beobachtungen bleiben.
+- Die Läuse-Erinnerung braucht die Waldkarte am Handy: einmal Standplätze → 🍯 Potenzial öffnen.
+
+Geprüft: alle 220 App-Tests am PC grün (neu u. a. `test_flugradius.js`, `test_karte_punkte.js`, `test_stufe.js`, `test_konto_stufe.js`, `test_waldtracht_app.js`), Server-Teil 390 Tests. Im Vorschau-Browser mit Test-Servern: Karte (Rollen, Knopf „📍“, Feld antippen, Namen ab Zoom 15), Stufen (Registrieren, Schlösser, Betreiber setzt Stufe, Waage → Max 1 Jahr, Ablauf-Leiste, eigener Server, Waage 61 Tage still), Waldtracht (Kachel, Ampel, Phase, Melezitose, „Ja“ → Stockkarte und Aufgabe, Ernte-Formular Waldhonig, Beobachtung), Handyansicht 375 px ohne seitliches Rollen, keine Konsolenfehler.
+Nicht geprüft: echtes Handy; gegen den echten Stockwaage-Server (läuft noch mit dem alten Stand); echte GeoSphere-Daten und eine echte Waldtracht-Saison.
+
 ## Version 1.4.0 · 08.11.2026 · Satellit über den Stockwaage-Server, Standplatz suchen
 Geänderte Dateien: satellit.js (neu), suche.js (neu), ertrag.js, zusatz.js, stockwaage.js, app.js, index.html, sw.js. Stand vor der Änderung: Ordner sicherung-1.3.0 (in Imkerei-sicherungen).
 

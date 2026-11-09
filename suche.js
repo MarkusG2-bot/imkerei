@@ -6,7 +6,7 @@ const SU_MAX = 3;
 // Einträge { nr, name, lat, lon, r, laeuft, fehler, ergebnis, stand, trachtkarte }; nr bleibt fest (Ziel #su-tracht-<nr>), der Index verschiebt sich
 let suPunkte = [], suNr = 0, suEingabe = { lat: '', lon: '', r: '' }, suSicht = null, suAufPunkt = false;   // suSicht: Ausschnitt der Karte über das Neuzeichnen hinweg
 const suZahl = v => parseFloat(String(v ?? '').replace(',', '.'));   // Komma oder Punkt; leer → NaN
-const suRadius = r => Math.min(5, Math.max(1, suZahl(r) || 3));
+const suRadius = r => Math.min(3, Math.max(1, suZahl(r) || 3));   // wie der Flugradius der App: höchstens 3 km
 const suNeu = () => { if (ansicht === 'suche') zeigeSuche(); };
 
 // Hängt einen Punkt an (der älteste fällt bei mehr als SU_MAX weg), rechnet ihn und liefert seinen Index
@@ -133,7 +133,7 @@ function zeigeSuche() {
     `<div class="zeile" style="margin-bottom:8px">
       <label class="klein-t" style="display:flex;gap:6px;align-items:center">Breite <input id="su-lat" inputmode="decimal" value="${esc(suEingabe.lat)}" oninput="suEingabe.lat=this.value" placeholder="47,72" style="width:96px"></label>
       <label class="klein-t" style="display:flex;gap:6px;align-items:center">Länge <input id="su-lon" inputmode="decimal" value="${esc(suEingabe.lon)}" oninput="suEingabe.lon=this.value" placeholder="16,04" style="width:96px"></label>
-      <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input id="su-r" type="number" min="1" max="5" step="0.5" value="${esc(r)}" oninput="suEingabe.r=this.value" style="width:72px"> km</label>
+      <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input id="su-r" type="number" min="1" max="3" step="0.5" value="${esc(r)}" oninput="suEingabe.r=this.value" style="width:72px"> km</label>
       <button class="haupt" onclick="suPruefen()">Punkt prüfen</button></div>
     <p class="leise klein-t">Klick auf die Karte setzt Breite und Länge. Gerechnet wird wie bei 🍯 Potenzial (AMA-Felder, Boden, Wald, Dürreindex), ohne Satellit und ohne Anmeldung. Nichts davon wird gespeichert; bis zu ${SU_MAX} Punkte stehen nebeneinander.</p>
     <div id="karte"></div>` +

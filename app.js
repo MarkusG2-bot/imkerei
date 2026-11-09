@@ -1,7 +1,7 @@
 // ---------- Daten ----------
-const VERSION = '1.4.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
+const VERSION = '1.5.0'; // wird beim Update gesetzt, muss zu CACHE in sw.js passen
 const KEY = 'imkerei-db-v1';
-const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [], fuetterungen: [], fuetterRunden: [] });
+const leer = () => ({ standorte: [], voelker: [], durchsichten: [], behandlungen: [], ernten: [], lager: [], bewegungen: [], aufgaben: [], wanderungen: [], varroa: [], vorschlaege: {}, einstellungen: {}, visBestaetigt: {}, buchungen: [], investitionen: [], beobachtungen: [], rechnungen: [], verkaeufe: [], abfuellungen: [], arbeitszeiten: [], sperrzonen: [], fuetterungen: [], fuetterRunden: [], waldbeobachtungen: [] });
 let db = laden();
 function laden() { try { return uebernehmen(Object.assign(leer(), JSON.parse(localStorage.getItem(KEY)) || {})); } catch { return leer(); } }
 // Ältere Datenstände anpassen: Trachtkarte lag früher im Textfeld „Trachtangebot“ (tracht)
@@ -223,6 +223,7 @@ function render() {
   const menueAktiv = ansicht === 'suche' ? 'standorte' : ansicht;
   $('#nav').innerHTML = geordnet('menue', true).filter(t => t.an || t.k === menueAktiv).map(t => `<button class="${t.k === menueAktiv ? 'aktiv' : ''}" onclick="gehe('${t.k}')">${t.label}</button>`).join('');
   uhrLeiste();
+  stufeAnzeigen();
   if (karte) { karte.remove(); karte = null; }
   ({ start: zeigeStart, standorte: zeigeStandorte, voelker: zeigeVoelker, behandlungen: zeigeBehandlungen, varroa: zeigeVarroa, ernten: zeigeErnten, lager: zeigeLager, verkauf: zeigeVerkauf, finanzen: zeigeFinanzen,
     vegetation: zeigeVegetation, aufgaben: zeigeAufgaben, arbeit: zeigeArbeit, stockwaage: zeigeStockwaage, daten: zeigeDaten, einstellungen: zeigeEinstellungen, suche: zeigeSuche })[ansicht]();
@@ -316,22 +317,41 @@ function zeigeStart() {
 // ---------- Standplätze ----------
 const hatKoord = s => s.lat != null && s.lon != null;
 const beutenAm = s => [...new Set(db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').map(v => v.beute))];
+// Standplatz auf der Karte setzen: nur nach dem Knopf „📍 Auf der Karte setzen“ öffnet ein Karten-Klick das Formular (sonst verschiebt man am Handy versehentlich)
+let punktModus = false;
+const kartenHinweisText = () => `📍 Auf der Karte setzen drücken, dann auf die Karte tippen – dort kommt ein neuer Standplatz hin. Marker lassen sich verschieben. Kreis = ${zahl(flugradius())} km Flugradius.`;
+function punktSetzen() {
+  punktModus = !punktModus;
+  if (punktModus && sperrModus) sperrEintragen();   // nicht beide Modi gleichzeitig
+  const h = $('#kartenhinweis'); if (h) h.textContent = punktModus ? 'Tippe jetzt auf die Karte, wo der neue Standplatz hinkommt. Nochmal drücken bricht ab.' : kartenHinweisText();
+  const b = $('#punkt-knopf'); if (b) b.classList.toggle('aktiv', punktModus);
+}
+function karteKlick(lat, lon) {
+  if (!sperrModus && !punktModus) return;
+  const sperre = sperrModus;
+  sperrModus = false; punktModus = false;   // beide Modi aus, damit der nächste Klick nichts mehr auslöst
+  const b = $('#punkt-knopf'); if (b) b.classList.remove('aktiv');
+  const s = $('#sperr-knopf'); if (s) s.classList.remove('haupt');
+  const h = $('#kartenhinweis'); if (h) h.textContent = kartenHinweisText();
+  if (sperre) bearbeiten('sperrzonen', null, { lat, lon }); else bearbeiten('standorte', null, { lat, lon, typ: 'Heimstand' });
+}
 function zeigeStandorte() {
-  main().innerHTML = kopf('Standplätze', `<button onclick="gehe('suche')">🔍 Standplatz suchen</button><button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
+  punktModus = false;
+  main().innerHTML = kopf('Standplätze', `<button onclick="gehe('suche')">🔍 Standplatz suchen</button><button id="punkt-knopf" onclick="punktSetzen()">📍 Auf der Karte setzen</button><button class="haupt" onclick="bearbeiten('standorte')">+ Standplatz</button>`) +
     `<div class="zeile" style="margin-bottom:8px"><input id="ortsuche" placeholder="Ort suchen …" style="max-width:240px"><button onclick="ortSuchen()">Suchen</button><button onclick="gps()">📍 Mein Standort</button><button id="sperr-knopf" onclick="sperrEintragen()">⚠ Sperrzone</button>
-     <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input type="number" min="0.5" max="10" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)" style="width:72px"> km</label>
-     <span class="leise klein-t" id="kartenhinweis">Klick auf die Karte trägt dort einen neuen Standplatz ein. Marker lassen sich verschieben. Kreis = ${zahl(flugradius())} km Flugradius.</span></div>
-    <div id="karte"></div><div id="tracht-info"></div><div id="tracht-karte"></div>` +
+     <label class="klein-t" style="display:flex;gap:6px;align-items:center">Flugradius <input type="number" min="0.5" max="3" step="0.5" value="${flugradius()}" onchange="radiusSetzen(this.value)" style="width:72px"> km</label>
+     <span class="leise klein-t" id="kartenhinweis">${kartenHinweisText()}</span></div>
+    <div id="karte"></div><div id="feld-info" class="feld-info" hidden></div><div id="tracht-info"></div><div id="tracht-karte"></div>` +
     (aktiveZonen().length ? `<ul class="hinweise" style="margin-bottom:12px">${sperrHinweise().map(([f, t]) => `<li class="${f}">${t}</li>`).join('') || `<li>${aktiveZonen().length} aktive Sperrzone(n) eingetragen – keiner deiner Standplätze liegt darin.</li>`}</ul>` : '') +
     tabelle(['Name', 'Art', 'Völker', 'Koordinaten', 'Reg.-Nr.', 'Tracht', ''], db.standorte.map(s => [
       `<b>${esc(s.name)}</b>${s.notiz ? `<div class="leise klein-t">${esc(s.notiz)}</div>` : ''}`, esc(s.typ),
       db.voelker.filter(v => v.standortId === s.id && v.status !== 'aufgelöst').length,
       hatKoord(s) ? `${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : marke('fehlen', 'gelb'), esc(s.regnr), esc(s.tracht),
-      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`])) + sperrListeHtml();
+      `<div class="zeile">${db.einstellungen.uhr ? '' : `<button class="klein" title="Arbeitszeit an diesem Stand starten" onclick="uhrStart('${s.id}')">⏱ Start</button>`}${hatKoord(s) ? `<button class="klein" onclick="potenzial('${s.id}')">🍯 Potenzial</button>` : ''}${typeof wtBeobachtungKnopf === 'function' ? wtBeobachtungKnopf(s) : ''}<button class="klein" onclick="bearbeiten('standorte','${s.id}')">Bearbeiten</button></div>`])) + sperrListeHtml();
   $('#ortsuche').onkeydown = e => { if (e.key === 'Enter') ortSuchen(); };
   satMelden().catch(() => {});   // vor der Karte, damit es auch ohne Leaflet läuft; höchstens einmal je Stunde
   if (!window.L) { $('#karte').outerHTML = '<p class="leer">Karte nicht verfügbar (keine Internetverbindung). Koordinaten können von Hand eingetragen werden.</p>'; return; }
-  karte = L.map('karte').setView([47.6, 14.1], 7);
+  karte = L.map('karte', { zoomSnap: 0.25 }).setView([47.6, 14.1], 7);   // Viertel-Zoomstufen: der Flugkreis füllt die Karte, statt eine ganze Stufe zu klein zu sein
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(karte);
   const punkte = [];
   for (const s of db.standorte.filter(hatKoord)) {
@@ -346,10 +366,7 @@ function zeigeStandorte() {
   }
   if (punkte.length) karte.fitBounds(punkte, { maxZoom: 13, padding: [40, 40] });
   sperrKreise();
-  karte.on('click', e => {
-    const lat = +e.latlng.lat.toFixed(5), lon = +e.latlng.lng.toFixed(5);
-    if (sperrModus) { sperrModus = false; bearbeiten('sperrzonen', null, { lat, lon }); } else bearbeiten('standorte', null, { lat, lon, typ: 'Heimstand' });
-  });
+  karte.on('click', e => karteKlick(+e.latlng.lat.toFixed(5), +e.latlng.lng.toFixed(5)));
 }
 async function ortSuchen() {
   const q = $('#ortsuche').value.trim(); if (!q || !karte) return;
@@ -358,7 +375,7 @@ async function ortSuchen() {
     const o = r.results?.[0];
     if (!o) { $('#kartenhinweis').textContent = `„${q}“ nicht gefunden.`; return; }
     karte.setView([o.latitude, o.longitude], 14);
-    $('#kartenhinweis').textContent = `${o.name}${o.admin1 ? ', ' + o.admin1 : ''} – jetzt auf die Karte klicken, um den Standplatz einzutragen.`;
+    $('#kartenhinweis').textContent = `${o.name}${o.admin1 ? ', ' + o.admin1 : ''} – jetzt „📍 Auf der Karte setzen“ drücken und den Punkt antippen.`;
   } catch { $('#kartenhinweis').textContent = 'Ortssuche nicht erreichbar.'; }
 }
 function gps() {
@@ -779,6 +796,8 @@ async function einspielen(datei) {
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.(); // Browser bitten, die Daten nicht automatisch zu löschen
-$('header h1').insertAdjacentHTML('beforeend', ` <small class="version">v${VERSION}</small>`);
+$('header h1').insertAdjacentHTML('beforeend', ` <small class="version">v${VERSION}</small> <small class="stufe" id="stufe-kopf"></small>`);
+try { if (typeof wtErinnerungen === 'function') wtErinnerungen(); } catch (e) { console.warn('Waldtracht-Erinnerung', e); }   // einmal je Start, vor dem Zeichnen (Aufgaben sichtbar)
 render();
 statusSpiegeln(); meldeJetzt();
+if (typeof stufeStart === 'function') stufeStart();   // Stufe auffrischen, ohne das Laden aufzuhalten; neu zeichnen nur bei Änderung

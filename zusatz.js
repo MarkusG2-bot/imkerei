@@ -143,11 +143,12 @@ function beobachten(sid, i) {
 }
 
 // ---------- Trachtkarte: Flächennutzung im Flugradius aus OpenStreetMap ----------
-// Flugradius in km, unter Standplätze einstellbar (0,5–10 km)
-const flugradius = () => db.einstellungen.flugradius || 3;
+// Flugradius in km, unter Standplätze einstellbar (0,5–3 km); ein früher gespeicherter größerer Wert zählt als 3
+const FLUGRADIUS_MAX = 3;
+const flugradius = () => Math.min(FLUGRADIUS_MAX, db.einstellungen.flugradius || 3);
 // Größerer Radius kann am Server die Satellitengeschichte neu auslösen – dann erst fragen (satellit.js); Nein → alter Wert bleibt
 function radiusSetzen(v) {
-  const r = Math.min(10, Math.max(0.5, reZahl(v) || 3));
+  const r = Math.min(FLUGRADIUS_MAX, Math.max(0.5, reZahl(v) || 3));
   if (typeof satRadiusOk !== 'function' || satRadiusOk(r)) { db.einstellungen.flugradius = r; speichern(); }
   render();
 }

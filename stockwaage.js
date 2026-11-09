@@ -12,7 +12,7 @@
 // Zuordnungen liegen in db (sind Teil der Imkerei-Daten): volk.waage = {stand, nr}, standort.waageStand.
 
 const SW_KONTO = 'imkerei-stockwaage';
-let swAnsicht = 'liste', swStaende = null, swFehler = '', swEin = null, swVerb = null, swTimer = null;
+let swAnsicht = 'liste', swStaende = null, swFehler = '', swSchloss = null, swEin = null, swVerb = null, swTimer = null;
 let swStandAktiv = null, swStandDaten = null, swVolkAktiv = null, swVolkTage = 30, swVolkDaten = null;
 const SW_ARTEN = { 1: 'Schwarm', 2: 'Bewegung', 3: 'Umsturz', 4: 'Räuberei-Verdacht', 5: 'Slave fehlt', 6: 'Akku', 7: 'Lastabwurf',
   8: 'Gewichtssprung (Eingriff?)', 9: 'Brut-Temperatur', 10: 'Volk still', 11: 'Diebstahl (Waage leer)', 12: 'Eingriff erkannt',
@@ -22,7 +22,7 @@ const SW_ARTEN = { 1: 'Schwarm', 2: 'Bewegung', 3: 'Umsturz', 4: 'Räuberei-Verd
   25: 'Summen-Muster verändert', 26: 'Akku Rähmchen-Modul schwach', 27: 'Flugloch verengt', 28: 'Flugloch wieder geöffnet',
   29: 'Flugloch-Schieber blockiert', 30: 'Räuberei (Kamera)', 31: 'Hitze im Stock', 32: 'Traube am Wabenende – Futter prüfen',
   33: 'Gefüttert – Flugloch verengt', 34: 'Schieber-Position korrigiert', 35: 'Schieberstellung passt nicht zur Kamera',
-  36: 'Waage fehlt – Diebstahl?' };
+  36: 'Waage fehlt – Diebstahl?', 37: 'Waldtracht erkannt', 38: 'Waldtracht zu Ende', 39: 'Zementhonig-Verdacht' };
 const SW_BLE = { dienst: '5f6d0001-5a3c-4b8e-9c1a-7c2d3e4f5a6b', info: '5f6d0002-5a3c-4b8e-9c1a-7c2d3e4f5a6b', anfrage: '5f6d0003-5a3c-4b8e-9c1a-7c2d3e4f5a6b',
   daten: '5f6d0004-5a3c-4b8e-9c1a-7c2d3e4f5a6b', status: '5f6d0005-5a3c-4b8e-9c1a-7c2d3e4f5a6b', best: '5f6d0006-5a3c-4b8e-9c1a-7c2d3e4f5a6b' };
 
@@ -39,7 +39,14 @@ async function swAbruf(pfad, opt = {}) {
   finally { clearTimeout(t); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && pfad !== '/api/anmelden') { swKontoSetzen({ server: k.server, benutzer: k.benutzer }); throw new Error('Anmeldung abgelaufen – bitte neu anmelden.'); }
-  if (!r.ok || !j.ok) throw new Error(j.fehler || `Server antwortet ${r.status}`);
+  // 402: Stufe reicht nicht (Schloss, kein Abmelden) bzw. eigener Server im Einrichtungs-Modus (gelber Hinweis, Stufe bleibt)
+  if (r.status === 402 && j.fehler === 'stufe') {
+    stufeMerken({ jetzt: j.jetzt, lizenz: stufeStand().lizenz ?? null });   // 402: nur die Stufe des Servers, kein altes bis/quelle
+    throw Object.assign(new Error('Diese Funktion braucht die Stufe ' + stufeName(j.noetig) + '.'), { stufe: j.noetig });
+  }
+  if (r.status === 402 && j.fehler === 'lizenz') throw Object.assign(new Error(j.text || 'Eigener Server: noch in der Einrichtung.'), { stufe: 'lizenz' });
+  // status und fehler mitgeben: Aufrufer erkennen Fälle am Feld (z. B. 403 fehler „freigabe“ mit Satz in text), nicht am Text
+  if (!r.ok || !j.ok) throw Object.assign(new Error(j.text || j.fehler || `Server antwortet ${r.status}`), { status: r.status, fehler: j.fehler ?? null });
   return j;
 }
 
@@ -58,7 +65,7 @@ const swVolkVon = (stand, nr) => db.voelker.find(v => v.waage?.stand === stand &
 // ---------- Seite ----------
 function zeigeStockwaage() {
   const k = swKonto();
-  if (!k.token) return swAnmeldeSeite(k);
+  if (!k.token) return swKontoSeite();                               // ohne Anmeldung: Konto & Stufe (anmelden oder registrieren)
   if (swAnsicht === 'einrichten') return swEinrichtenSeite();
   if (swAnsicht === 'verbinden') return swVerbindenSeite();
   if (swAnsicht === 'stand') return swStandSeite();
@@ -71,14 +78,16 @@ function zeigeStockwaage() {
   if (swAnsicht === 'betrieb') return swBetriebSeite();
   if (swAnsicht === 'meldungen') return swMeldungenSeite();
   swStopp();
+  // Waage einrichten bleibt frei (Koppeln → 1 Jahr Max); Stände und Meldungen brauchen Waage, die Karte Pro
+  const stand = swStufeFrei('waage');
   main().innerHTML = kopf('Stockwaage', `<button class="haupt" onclick="swEinrichtenStart()">＋ Waage einrichten</button>
-      <button onclick="swVerbindenStart()">📶 Stand verbinden</button><button onclick="swZus=null;swSeite('meldungen')">🔔 Meldungen</button>
-      <button onclick="swSeite('teilen')">🔒 Daten teilen</button><button onclick="swSeite('karte')">🗺 Karte</button>
-      <button onclick="swSeite('konto')">👤 Konto</button>${k.konto?.rolle === 'betreiber' ? `<button onclick="swSeite('betrieb')">🛠 Betrieb</button>` : ''}`) +
-    (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
+      ${swStufeKnopf('waage', 'Stand verbinden: Fortschritt der Waage und Abholen per Bluetooth', '📶 Stand verbinden', 'swVerbindenStart()')}${swStufeKnopf('waage', 'Meldungen der Waage aufs Handy und Zusammenfassung', '🔔 Meldungen', "swZus=null;swSeite('meldungen')")}
+      <button onclick="swSeite('teilen')">🔒 Daten teilen</button>${swStufeKnopf('pro', 'Karte der Stände anderer Teilnehmer', '🗺 Karte', "swSeite('karte')")}
+      <button onclick="swSeite('konto')">👤 Konto &amp; Stufe</button>${k.konto?.rolle === 'betreiber' ? `<button onclick="swSeite('betrieb')">🛠 Betrieb</button>` : ''}`) +
+    swAblaufLeiste() + swFehlerZeile() +
     (swStaende == null ? '<p class="leise">Lade …</p>' : swStaende.length === 0
       ? '<div class="karte">Noch keine Waage eingerichtet. Mit „＋ Waage einrichten“ beginnen.</div>'
-      : `<div class="raster">${swStaende.map(s => `<div class="karte" style="cursor:pointer" onclick="swStandOeffnen('${s.stand}')"><h4>${swName(s)}</h4>
+      : `<div class="raster">${swStaende.map(s => `<div class="karte" style="cursor:pointer" onclick="${stand ? `swStandOeffnen('${s.stand}')` : swHinweisAufruf('waage', 'Stand mit Gewicht, Ereignissen, Videos und Befehlen')}"><h4>${swName(s)}${stand ? '' : ' ' + swSchlossMarke('waage')}</h4>
           <div class="klein-t leise">Stand ${esc(s.stand)}${s.firmware ? ' · Firmware ' + esc(s.firmware) : ''}</div>
           <div style="margin-top:6px">Funk: <b>${swVor(s.letzter_funk)}</b> · hochgeladen: <b>${swVor(s.letzter_upload)}</b></div>
           <div class="klein-t">${zahl(s.messungen)} Messwerte von ${s.voelker} ${s.voelker === 1 ? 'Volk' : 'Völkern'}${s.letzte_messung ? ' · jüngster ' + fmtD(swDatum(s.letzte_messung).slice(0, 10)) : ''}</div>
@@ -89,35 +98,96 @@ function zeigeStockwaage() {
 }
 async function swLaden() {
   try {
-    if (!swKonto().konto) { const k = swKonto(); swKontoSetzen({ ...k, konto: (await swAbruf('/api/app/ich')).konto }); }  // Anmeldung aus 1.1
-    swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); swFehler = '';
+    if (!swKonto().konto || !stufeFrisch()) {                       // Konto (Anmeldung aus 1.1) und Stufe höchstens stündlich neu
+      const j = await swAbruf('/api/app/ich');
+      swKontoSetzen({ ...swKonto(), konto: j.konto || swKonto().konto }); stufeMerken(j.stufe, j.lizenz);
+    }
+    swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); swFehler = ''; swSchloss = null;
     swErntePruefen(swStaende);                                      // Trachtende → Aufgabe „Ernte prüfen“ (einmal je Stand und Trachtende)
   }
-  catch (e) { swStaende = swStaende || []; swFehler = e.message; }
+  catch (e) { swStaende = swStaende || []; swFehler = e.message; swSchloss = e.stufe || null; }
   if (ansicht === 'stockwaage') render();
 }
 
-function swAnmeldeSeite(k) {
-  main().innerHTML = kopf('Stockwaage') + `<div class="karte" style="max-width:480px">
-      <h4>Mit dem Stockwaage-Server verbinden</h4>
-      <p class="klein-t leise">Einmal je Handy. Die Adresse ist die des Servers (eigener PC über Tailscale Funnel oder die Web-Adresse
-        des Anbieters). Benutzername und Passwort: bei der Installation festgelegt oder vom Betreiber erhalten.</p>
-      <label>Server-Adresse<input id="sw-server" value="${esc(k.server || '')}" placeholder="https://…"></label>
-      <label>Benutzername<input id="sw-benutzer" value="${esc(k.benutzer || '')}" autocomplete="username" autocapitalize="none"></label>
-      <label>Passwort <input id="sw-pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')swAnmelden()"></label>
-      ${swFehler ? `<p class="rot-t">${esc(swFehler)}</p>` : ''}
-      <p class="klein-t leise">Mit der Anmeldung gilt die <a href="#" onclick="swDatenschutz();return false">Datenschutzerklärung</a> des Servers.</p>
-      <button class="haupt" style="margin-top:10px" onclick="swAnmelden()">Anmelden</button></div>`;
+// ---------- Stufe: Schlösser und Ablauf-Leiste (stufe.js liefert Stand, Namen und Hinweis) ----------
+// Reicht die Stufe? Eigener Server: alles frei (Max für alle). Noch nie vom Server gehört (gerade angemeldet, noch nicht geladen):
+// kein Schloss – der Server entscheidet ohnehin (402). Ohne stufe.js (Tests älterer Teile) frei.
+function swStufeFrei(noetig) {
+  if (typeof stufeStand !== 'function') return true;
+  const s = stufeStand();
+  if (s.lizenz) return true;
+  if (!s.veraltet && !stufeGespeichert()) return true;
+  return stufeDeckt(noetig, s.jetzt);
 }
+// Wie schloss(), aber ohne eigenes onclick – für Knöpfe und Kacheln, die selbst den Hinweis öffnen (sonst ginge er zweimal auf)
+const swSchlossMarke = noetig => `<span class="schloss-marke">🔒 <span class="schloss">${stufeName(noetig)}</span></span>`;
+const swHinweisAufruf = (noetig, was) => esc(`stufeHinweis(${JSON.stringify(noetig)},${JSON.stringify(was)})`);
+// Knopf, der eine Stufe braucht: reicht sie nicht, trägt er das Schloss und erklärt die Wege, statt die Seite zu öffnen
+function swStufeKnopf(noetig, was, inhalt, aufruf) {
+  return swStufeFrei(noetig) ? `<button onclick="${aufruf}">${inhalt}</button>`
+    : `<button title="Braucht die Stufe ${stufeName(noetig)}" onclick="${swHinweisAufruf(noetig, was)}">${inhalt} ${swSchlossMarke(noetig)}</button>`;
+}
+// 14 Tage vor Ablauf: Leiste oben, einmal je Tag (gemerkt in imkerei-stufe-leiste); bleibt stehen, bis man die Seite wechselt
+const SW_LEISTE = 'imkerei-stufe-leiste';
+let swLeiste = null;
+const swAblaufText = s => `Deine Stufe ${stufeName(s.jetzt)} läuft am ${stufeDatum(s.bis)} ab`;
+function swAblaufLeiste() {
+  const s = stufeStand();
+  if (!s.hinweis_ablauf || !stufeDatum(s.bis)) return '';
+  if (swLeiste !== heute()) {
+    let zuletzt = null;
+    try { zuletzt = localStorage.getItem(SW_LEISTE); } catch { /* ohne Speicher: jedes Mal zeigen */ }
+    if (zuletzt === heute()) return '';
+    try { localStorage.setItem(SW_LEISTE, heute()); } catch { /* egal */ }
+    swLeiste = heute();
+  }
+  return `<ul class="hinweise"><li>${esc(swAblaufText(s))} – <a href="#" onclick="swSeite('konto');return false">Konto &amp; Stufe</a></li></ul>`;
+}
+// Woher die Stufe kommt, in Worten
+const SW_QUELLE = { probe: 'Probezeit', betreiber: 'vom Betreiber gesetzt', uebergang: 'vom Betreiber gesetzt', waage_jahr: '1 Jahr durch deine Waage', rueckfall: '' };
+function swQuelleText(quelle, rueckfall) {
+  const t = SW_QUELLE[quelle] || '';
+  return !rueckfall ? t : t ? `${t} · dazu Waage ohne Ablauf` : 'Waage ohne Ablauf';
+}
+
 async function swAnmelden() {
   const server = $('#sw-server').value.trim().replace(/\/+$/, ''), pw = $('#sw-pw').value, benutzer = $('#sw-benutzer').value.trim();
-  if (!/^https?:\/\//.test(server)) { swFehler = 'Server-Adresse beginnt mit https://'; return render(); }
+  if (!/^https?:\/\//.test(server)) { swFehler = 'Server-Adresse beginnt mit https://'; swSchloss = null; return render(); }
   swKontoSetzen({ server, benutzer });
   try {
     const j = await swAbruf('/api/anmelden', { method: 'POST', body: JSON.stringify({ benutzer: benutzer || null, passwort: pw }) });
-    swKontoSetzen({ server, benutzer, token: j.token, konto: j.konto }); swFehler = ''; swStaende = null; swAnsicht = 'liste';
-  } catch (e) { swFehler = e.message; }
+    swKontoSetzen({ server, benutzer, token: j.token, konto: j.konto }); swReg = null; swFehler = ''; swSchloss = null; swStaende = null; swAnsicht = 'liste';
+  } catch (e) { swFehlerVon(e); }
   render();
+}
+// Selbst registrieren (Server-Adresse aus dem Anmelde-Feld): Konto mit Probezeit, danach gleich angemeldet
+// swReg: Eingaben fürs Neuzeichnen nach einem Fehler (Adresse, Benutzername, E-Mail – nie das Passwort)
+let swReg = null;
+async function swRegistrieren() {
+  const server = $('#sw-server').value.trim().replace(/\/+$/, ''), benutzer = $('#sw-rb').value.trim(), email = $('#sw-re').value.trim(), pw = $('#sw-rpw').value;
+  swReg = { server, benutzer, email };
+  const fehler = t => { swFehler = t; swSchloss = null; render(); };
+  if (!/^https?:\/\//.test(server)) return fehler('Server-Adresse beginnt mit https://');
+  if (!benutzer) return fehler('Benutzername fehlt.');
+  if (pw.length < 10) return fehler('Passwort: mindestens 10 Zeichen');
+  if (!$('#sw-rn').checked || !$('#sw-rd').checked) return fehler('Bitte Nutzungsbedingungen und Datenschutz bestätigen');
+  swKontoSetzen({ server, benutzer });                               // ohne Token: die Anfrage geht ohne Anmeldung
+  try {
+    const j = await swAbruf('/api/registrieren', { method: 'POST', body: JSON.stringify({ benutzer, email, passwort: pw, nutzung: true, datenschutz: true }) });
+    swKontoSetzen({ server, benutzer, token: j.token, konto: j.konto });
+    // Stufe samt Lizenz (eigener Server) gleich aus ich – die Registrier-Antwort kennt keine Lizenz; geht das nicht, ihre Stufe
+    try { const i = await swAbruf('/api/app/ich'); stufeMerken(i.stufe, i.lizenz); } catch { stufeMerken(j.stufe); }
+    swReg = null; swFehler = ''; swSchloss = null; swStaende = null; swAnsicht = 'liste';
+  } catch (e) { swFehlerVon(e); }
+  render();
+}
+// Beim Tippen der Server-Adresse: Registrieren zeigen und die Links der Häkchen auf diesen Server stellen
+function swServerTippen(wert) {
+  const srv = String(wert).trim().replace(/\/+$/, ''), reg = $('#sw-reg');
+  if (reg) reg.hidden = !/^https?:\/\/./.test(srv);
+  const n = $('#sw-ln'), d = $('#sw-ld');
+  if (n) n.href = srv + '/nutzungsbedingungen';
+  if (d) d.href = srv + '/datenschutz';
 }
 function swAbmelden() {
   if (!confirm('Vom Stockwaage-Server abmelden? Die Daten am Server bleiben.')) return;
@@ -135,8 +205,8 @@ async function swCodeHolen() {
   swEin.name = $('#sw-name').value.trim();
   try {
     const j = await swAbruf('/api/app/kopplungscode', { method: 'POST', body: JSON.stringify({ name: swEin.name }) });
-    Object.assign(swEin, { code: j.code, ablauf: j.ablauf, schritt: 2, start: Date.now() }); swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    Object.assign(swEin, { code: j.code, ablauf: j.ablauf, schritt: 2, start: Date.now() }); swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   render();
 }
 function swEinrichtenSeite() {
@@ -189,17 +259,17 @@ async function swEinrichtenPruefen() {
     const neu = st.find(s => s.angelegt >= swEin.start - 1000 && (s.name || '') === swEin.name)
       || (await Promise.all(st.map(async s => ({ s, n: await swAbruf(`/api/app/stand/${s.stand}/neu?seit=${swEin.start}`) }))))
         .find(x => x.n.gekoppelt >= swEin.start)?.s;
-    swFehler = '';
+    swFehler = ''; swSchloss = null;
     if (neu) { swStopp(); swEin.schritt = 3; swEin.stand = neu; swStaende = null; }
-  } catch (e) { swFehler = e.message; }
-  if (Date.now() > swEin.ablauf) { swStopp(); swFehler = 'Der Code ist abgelaufen – zurück und einen neuen holen.'; }
+  } catch (e) { swFehlerVon(e); }
+  if (Date.now() > swEin.ablauf) { swStopp(); swFehler = 'Der Code ist abgelaufen – zurück und einen neuen holen.'; swSchloss = null; }
   if (ansicht === 'stockwaage' && swAnsicht === 'einrichten') render();
 }
 
 // ---------- Stand verbinden (Handy-Hotspot oder Bluetooth) ----------
 async function swVerbindenStart(stand) {
-  if (!swStaende) try { swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); } catch (e) { swFehler = e.message; return render(); }
-  if (!swStaende.length) { swFehler = 'Noch keine Waage eingerichtet.'; return render(); }
+  if (!swStaende) try { swStaende = swBleMerken((await swAbruf('/api/app/staende')).staende); } catch (e) { swFehlerVon(e); return render(); }
+  if (!swStaende.length) { swFehler = 'Noch keine Waage eingerichtet.'; swSchloss = null; return render(); }
   swVerb = { stand: stand || (swStaende.length === 1 ? swStaende[0].stand : null), start: Date.now(), uploads: 0, neu: 0, zuletzt: null, ble: '' };
   swAnsicht = 'verbinden'; render();
 }
@@ -238,8 +308,8 @@ function swVerbindenSeite() {
 async function swVerbindenPruefen() {
   try {
     const n = await swAbruf(`/api/app/stand/${swVerb.stand}/neu?seit=${swVerb.start}`);
-    Object.assign(swVerb, { uploads: n.uploads, neu: n.neu, zuletzt: n.zuletzt }); swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    Object.assign(swVerb, { uploads: n.uploads, neu: n.neu, zuletzt: n.zuletzt }); swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   if (Date.now() - swVerb.start > 20 * 6e4) swStopp();      // nach 20 min nicht mehr nachfragen
   if (ansicht === 'stockwaage' && swAnsicht === 'verbinden') render();
 }
@@ -350,9 +420,9 @@ async function swStandLaden() {
     swStandDaten.akkus = await swAbruf(`/api/app/stand/${swStandAktiv}/akkus`).catch(() => null);
     swStandDaten.lage = (await swAbruf(`/api/app/stand/${swStandAktiv}/lage`).catch(() => ({}))).waagen || [];
     if (swStandDaten.tracht) swErnteAufgabe(swStandAktiv, swStandDaten.tracht.ernte, (swStaende || []).find(x => x.stand === swStandAktiv)?.name || 'Stand ' + swStandAktiv);
-    swFehler = '';
+    swFehler = ''; swSchloss = null;
   }
-  catch (e) { swFehler = e.message; swStandDaten = swStandDaten || { voelker: [], ereignisse: [], befehle: [] }; }
+  catch (e) { swFehlerVon(e); swStandDaten = swStandDaten || { voelker: [], ereignisse: [], befehle: [] }; }
   if (ansicht === 'stockwaage' && swAnsicht === 'stand') render();
 }
 function swStandSeite() {
@@ -367,7 +437,7 @@ function swStandSeite() {
   main().innerHTML = kopf(swName(s), `${swZurueck()}<button onclick="swVerbindenStart('${s.stand}')">📶 Verbinden</button>
       <button onclick="swBefehl('bearbeitung',0,120,'Stand 2 h in Bearbeitung')">🛠 Bearbeitung 2 h</button>
       <button onclick="fuStart('${s.stand}')">🍯 Füttern</button><button onclick="swBefehlFragen()">⚙ Befehl</button>`) +
-    (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
+    swFehlerZeile() +                                                // 402 → Schloss statt roter Zeile, angemeldet bleiben
     `<div class="raster">
       <div class="karte kachel"><b>${b?.gesamt_kg != null ? zahl(b.gesamt_kg, 1) + ' kg' : '–'}</b>Stand gesamt${b ? ' · ' + swVor(b.zeit) : ''}</div>
       <div class="karte kachel"><b>${b?.median_heute_kg != null ? (b.median_heute_kg > 0 ? '+' : '') + zahl(b.median_heute_kg, 2) + ' kg' : '–'}</b>heute je Volk (Mittel)${b?.voelker_im_flug != null ? ` · ${b.voelker_im_flug} fliegen` : ''}</div>
@@ -485,9 +555,9 @@ async function swTaktSetzen() {
   try {
     await swAbruf(`/api/app/stand/${swStandAktiv}/befehl`, { method: 'POST', body: JSON.stringify({ art: 'takt', volk: 0, wert: mess, text: `Messtakt ${swMin(mess)}` }) });
     await swAbruf(`/api/app/stand/${swStandAktiv}/befehl`, { method: 'POST', body: JSON.stringify({ art: 'sendetakt', volk: 0, wert: sende, text: `Sendetakt ${swMin(sende)}` }) });
-    swFehler = '';
+    swFehler = ''; swSchloss = null;
     alert('Gespeichert. Der Master übernimmt es beim nächsten Handy-Abgleich oder per Funk nach dem nächsten Bericht.');
-  } catch (e) { swFehler = e.message; }
+  } catch (e) { swFehlerVon(e); }
   swStandLaden();
 }
 
@@ -618,8 +688,8 @@ async function swKalibSchritt1() {
   try {
     await swKalibBefehl('bearbeitung', 60, `Volk ${swKal.nr}: Kalibrieren`);
     swKal.id1 = await swKalibBefehl('kalibrieren', 0, `Kalibrieren Waage ${swKal.nr}: Bezug`);
-    swKal.schritt = 1; swKal.erledigt = false; swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    swKal.schritt = 1; swKal.erledigt = false; swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   render();
 }
 async function swKalibSchritt2() {
@@ -630,8 +700,8 @@ async function swKalibSchritt2() {
   try {
     swKal.seit = Math.floor(Date.now() / 1000);
     await swKalibBefehl('kalibrieren', g, `Kalibrieren Waage ${swKal.nr}: ${zahl(g / 1000, 3)} kg`);
-    swKal.schritt = 2; swKal.ergebnis = null; swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    swKal.schritt = 2; swKal.ergebnis = null; swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   render();
 }
 async function swKalibPruefen() {
@@ -644,8 +714,8 @@ async function swKalibPruefen() {
       const r = await swAbruf(`/api/app/stand/${k.stand}/kalibrierung?volk=${k.nr}&seit=${k.seit - 60}`);
       k.ergebnis = r.ergebnis; k.gewicht = r.letzte?.gewicht_g;
     }
-    swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   if (ansicht === 'stockwaage' && swAnsicht === 'kalib') render();
 }
 async function swKalibFertig() {
@@ -705,9 +775,9 @@ function swPlatz(stand, standortId) {
 async function swBefehl(art, volkNr, wert, text, stand = swStandAktiv) {
   try {
     const j = await swAbruf(`/api/app/stand/${stand}/befehl`, { method: 'POST', body: JSON.stringify({ art, volk: volkNr, wert, text }) });
-    swFehler = '';
+    swFehler = ''; swSchloss = null;
     if (ansicht === 'stockwaage') alert(`Befehl gespeichert. Er geht ${j.ttn ? 'per Funk nach dem nächsten Bericht oder ' : ''}beim nächsten Handy-Abgleich an den Master.`);
-  } catch (e) { swFehler = e.message; }
+  } catch (e) { swFehlerVon(e); }
   if (ansicht === 'stockwaage' && swAnsicht === 'stand') swStandLaden();
 }
 function swBefehlFragen() {
@@ -768,8 +838,8 @@ async function swVolkLaden() {
       swAbruf(`/api/app/stand/${st}/ereignisse?volk=${nr}&seit=${von}`),
       swAbruf(`/api/app/stand/${st}/clips?volk=${nr}&seit=${von}`).catch(() => ({ clips: [] }))]);
     const x = await swAbruf(`/api/app/stand/${st}/erweiterungen?volk=${nr}`).catch(() => ({}));   // älterer Server: keine
-    swVolkDaten = { werte: v.werte, tage: t.tage, ereignisse: e.ereignisse, clips: c.clips, erw: x }; swFehler = '';
-  } catch (e) { swFehler = e.message; swVolkDaten = { werte: [], tage: [], ereignisse: [], clips: [], erw: {} }; }
+    swVolkDaten = { werte: v.werte, tage: t.tage, ereignisse: e.ereignisse, clips: c.clips, erw: x }; swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); swVolkDaten = { werte: [], tage: [], ereignisse: [], clips: [], erw: {} }; }
   if (ansicht === 'stockwaage' && swAnsicht === 'volk') render();
 }
 function swVolkSeite() {
@@ -1059,12 +1129,17 @@ window.addEventListener('load', () => { if (location.hash === '#stockwaage' && t
 // Jede Stufe ist eine eigene Einwilligung: Text lesen, Häkchen „gelesen und einverstanden“, dann Erlauben. Widerruf jederzeit.
 // Standort und Ertrag schickt die App nur mit der jeweiligen Einwilligung an den Server (Standplätze mit Waage).
 let swTeilen = null, swKarteDaten = null, swBetrieb = null, swKarteObj = null;
-const swSeite = was => { swAnsicht = was; swFehler = ''; swTeilen = swKarteDaten = swBetrieb = null; swStopp(); render(); };
-const swFehlerZeile = () => swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '';
+const swSeite = was => { swAnsicht = was; swFehler = ''; swSchloss = null; swLeiste = null; swTeilen = swKarteDaten = swBetrieb = null; swStopp(); render(); };
+// Fehler aus swAbruf merken: Text und – bei 402 – die nötige Stufe (sonst bliebe ein altes Schloss stehen)
+function swFehlerVon(e) { swFehler = e.message; swSchloss = e.stufe || null; }
+// swSchloss: nötige Stufe aus einer 402-Antwort → Schloss statt roter Zeile; 'lizenz' = eigener Server in der Einrichtung → gelber Hinweis
+const swFehlerZeile = () => !swFehler ? '' : swSchloss === 'lizenz' ? `<ul class="hinweise"><li>${esc(swFehler)}</li></ul>`
+  : swSchloss ? `<ul class="hinweise"><li class="schloss-zeile">${schloss(swSchloss, swFehler)} ${esc(swFehler)}</li></ul>`
+  : `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>`;
 const swZeit = ms => ms ? new Date(ms).toLocaleString('de-AT', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
 async function swNeuLaden(fn) {
-  try { await fn(); swFehler = ''; } catch (e) { swFehler = e.message; }
+  try { await fn(); swFehler = ''; swSchloss = null; } catch (e) { swFehlerVon(e); }
   if (ansicht === 'stockwaage') render();
 }
 
@@ -1093,11 +1168,11 @@ function swTeilenSeite() {
 }
 
 async function swFreigabe(stufe, an, version) {
-  if (an && !$('#sw-ok-' + stufe)?.checked) { swFehler = 'Bitte zuerst das Häkchen „gelesen und einverstanden“ setzen.'; return render(); }
+  if (an && !$('#sw-ok-' + stufe)?.checked) { swFehler = 'Bitte zuerst das Häkchen „gelesen und einverstanden“ setzen.'; swSchloss = null; return render(); }
   const titel = swTeilen.find(x => x.stufe === stufe)?.titel;
   if (!an && !confirm(`„${titel}“ widerrufen?` + (stufe === 'standort' ? ' Die gespeicherten Standorte werden gelöscht, die Karte wird mit widerrufen.' :
-    stufe === 'ertrag' ? ' Die gespeicherten Ertragsdaten werden gelöscht.' :
-    stufe === 'satellit' ? ' Die gemeldeten Standplätze und alle Satellitenwerte am Server werden gelöscht.' : ''))) return;
+    stufe === 'ertrag' ? ' Die gespeicherten Ertragsdaten werden gelöscht. Die Datensammlung bleibt ohne Bezug zu dir: Lage auf 1 km vergröbert, Name und Konto nicht enthalten.' :
+    stufe === 'satellit' ? ' Die gemeldeten Standplätze und alle Satelliten- und Waldtracht-Werte deiner Standplätze werden gelöscht; die Datensammlung (Ertragsdaten) bleibt vergröbert ohne Bezug zu dir.' : ''))) return;
   await swNeuLaden(async () => {
     swTeilen = (await swAbruf('/api/app/freigaben', { method: 'POST', body: JSON.stringify({ stufe, an, version }) })).freigaben;
     if (an && stufe === 'standort') await swOrteSenden();
@@ -1151,12 +1226,14 @@ function swKarteSeite() {
   if (punkte.length) swKarteObj.fitBounds(punkte, { padding: [30, 30], maxZoom: 14 });
 }
 
-// Konto: Passwort ändern, eigene Daten herunterladen, Konto löschen
+// Konto & Stufe: ohne Anmeldung Anmelden und Registrieren; angemeldet Deine Stufe, Konto, Passwort, eigene Daten, Konto löschen
 function swKontoSeite() {
-  const k = swKonto().konto || {};
-  main().innerHTML = kopf('Konto', swZurueck()) + swFehlerZeile() + `<div class="raster">
+  const a = swKonto(), k = a.konto || {};
+  if (!a.token) return swEinstiegSeite(a);
+  main().innerHTML = kopf('Konto &amp; Stufe', swZurueck()) + swFehlerZeile() + `<div class="raster">
+    ${swStufeKarte(a)}
     <div class="karte"><h4>${esc(k.name || k.benutzer || '')}</h4><div class="klein-t">Benutzer ${esc(k.benutzer || '–')}${k.email ? ' · ' + esc(k.email) : ''}<br>
-      ${k.rolle === 'betreiber' ? 'Betreiber des Servers' : 'Kunde'}</div></div>
+      ${k.rolle === 'betreiber' ? 'Betreiber des Servers' : 'Kunde'}<br>Server ${esc(a.server)} · <a href="#" onclick="swAbmelden();return false">abmelden</a></div></div>
     <div class="karte"><h4>Passwort ändern</h4>
       <label>Altes Passwort<input id="sw-pa" type="password" autocomplete="current-password"></label>
       <label>Neues Passwort (mind. 8 Zeichen)<input id="sw-pn" type="password" autocomplete="new-password"></label>
@@ -1168,13 +1245,55 @@ function swKontoSeite() {
       <label>Passwort zur Bestätigung<input id="sw-pl" type="password" autocomplete="current-password"></label>
       <button style="margin-top:8px" onclick="swKontoLoeschen()">🗑 Konto endgültig löschen</button></div></div>`;
 }
+// Karte „Deine Stufe“: Name, bis, Quelle in Worten, Ablauf-Hinweis, eigener Server mit Lizenz
+function swStufeKarte(a) {
+  const s = stufeStand(), lz = s.lizenz, q = swQuelleText(s.quelle, s.rueckfall_waage);
+  const datum = stufeDatum(s.bis), bis = s.jetzt === 'normal' ? '' : datum ? 'gültig bis ' + datum : 'ohne Ablauf';
+  return `<div class="karte"><h4>Deine Stufe: ${esc(stufeName(s.jetzt))}</h4>
+    ${bis || q ? `<div class="klein-t">${esc([bis, q].filter(Boolean).join(' · '))}</div>` : ''}
+    ${s.hinweis_ablauf && datum ? `<ul class="hinweise" style="margin-top:8px"><li>${esc(swAblaufText(s))}</li></ul>` : ''}
+    ${s.veraltet ? '<p class="klein-t">Seit über 7 Tagen keine Antwort vom Server – bis dahin gilt Normal. Alles am Handy bleibt.</p>' : ''}
+    ${lz ? `<p class="klein-t">${lz.name ? 'Eigener Server – lizenziert für ' + esc(lz.name) : 'Eigener Server' + (lz.text ? ' – ' + esc(lz.text) : '')}
+      · <a href="${esc(a.server)}/lizenz" target="_blank" rel="noopener">Lizenz</a></p>`
+      : s.jetzt === 'normal' ? '<p class="klein-t leise">Mehr mit dem Server: Stockwaage koppeln – 1 Jahr Max inklusive · Betreiber fragen</p>' : ''}
+    <button class="klein" style="margin-top:6px" onclick="swStufeNeu()">↻ Beim Server nachfragen</button></div>`;
+}
+async function swStufeNeu() {
+  await swNeuLaden(async () => {
+    const j = await swAbruf('/api/app/ich');
+    swKontoSetzen({ ...swKonto(), konto: j.konto || swKonto().konto }); stufeMerken(j.stufe, j.lizenz);
+  });
+}
+// Ohne Anmeldung: Anmelden und – sobald eine Server-Adresse dasteht – Registrieren (gleiches Adressfeld)
+// Nach einem Fehler beim Registrieren stehen Adresse, Benutzername und E-Mail wieder da (swReg), das Passwort nicht
+function swEinstiegSeite(a) {
+  const r = swReg || {}, adresse = r.server || a.server || '';
+  const srv = String(adresse).replace(/\/+$/, ''), regDa = /^https?:\/\/./.test(srv);
+  main().innerHTML = kopf('Konto &amp; Stufe') + swFehlerZeile() + `<div class="raster">
+    <div class="karte"><h4>Anmelden</h4>
+      <p class="klein-t leise">Einmal je Handy. Die Adresse ist die des Servers (eigener PC über Tailscale Funnel oder die Web-Adresse
+        des Anbieters). Benutzername und Passwort: bei der Installation festgelegt oder vom Betreiber erhalten.</p>
+      <label>Server-Adresse<input id="sw-server" value="${esc(adresse)}" placeholder="https://…" oninput="swServerTippen(this.value)"></label>
+      <label>Benutzername<input id="sw-benutzer" value="${esc(a.benutzer || '')}" autocomplete="username" autocapitalize="none"></label>
+      <label>Passwort <input id="sw-pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')swAnmelden()"></label>
+      <p class="klein-t leise">Mit der Anmeldung gilt die <a href="#" onclick="swDatenschutz();return false">Datenschutzerklärung</a> des Servers.</p>
+      <button class="haupt" style="margin-top:10px" onclick="swAnmelden()">Anmelden</button></div>
+    <div class="karte" id="sw-reg"${regDa ? '' : ' hidden'}><h4>Registrieren</h4>
+      <p class="klein-t leise">Noch kein Konto? Selbst anlegen: registrieren – 30 Tage Pro zum Probieren. Die Server-Adresse oben gilt auch hier.</p>
+      <label>Benutzername<input id="sw-rb" value="${esc(r.benutzer || '')}" autocomplete="username" autocapitalize="none"></label>
+      <label>E-Mail<input id="sw-re" type="email" value="${esc(r.email || '')}" autocomplete="email"></label>
+      <label>Passwort (mind. 10 Zeichen)<input id="sw-rpw" type="password" autocomplete="new-password"></label>
+      <label class="check"><input type="checkbox" id="sw-rn"> Ich stimme den <a id="sw-ln" href="${esc(srv)}/nutzungsbedingungen" target="_blank" rel="noopener">Nutzungsbedingungen</a> zu.</label>
+      <label class="check"><input type="checkbox" id="sw-rd"> Ich habe die <a id="sw-ld" href="${esc(srv)}/datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a> gelesen.</label>
+      <button class="haupt" style="margin-top:10px" onclick="swRegistrieren()">Registrieren</button></div></div>`;
+}
 async function swPasswort() {
   const alt = $('#sw-pa').value, neu = $('#sw-pn').value;
-  if (neu.length < 8) { swFehler = 'Das neue Passwort braucht mindestens 8 Zeichen.'; return render(); }
+  if (neu.length < 8) { swFehler = 'Das neue Passwort braucht mindestens 8 Zeichen.'; swSchloss = null; return render(); }
   try { await swAbruf('/api/app/passwort', { method: 'POST', body: JSON.stringify({ alt, neu }) }); }
-  catch (e) { swFehler = e.message; return render(); }
+  catch (e) { swFehlerVon(e); return render(); }
   alert('Passwort geändert – bitte mit dem neuen Passwort anmelden.');
-  const k = swKonto(); swKontoSetzen({ server: k.server, benutzer: k.benutzer }); swAnsicht = 'liste'; swFehler = ''; render();
+  const k = swKonto(); swKontoSetzen({ server: k.server, benutzer: k.benutzer }); swAnsicht = 'liste'; swFehler = ''; swSchloss = null; render();
 }
 // Herunterladen mit Anmeldung im Kopf (nicht in der Adresse)
 async function swDatei(pfad, name) {
@@ -1184,16 +1303,16 @@ async function swDatei(pfad, name) {
     if (!r.ok) throw new Error(`Server antwortet ${r.status}`);
     const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  } catch (e) { swFehler = e.message; render(); }
+  } catch (e) { swFehlerVon(e); render(); }
 }
 const swMeineDaten = () => swDatei('/api/app/meine-daten', `stockwaage-${swKonto().konto?.benutzer || 'daten'}.zip`);
 async function swKontoLoeschen() {
   const pw = $('#sw-pl').value;
-  if (!pw) { swFehler = 'Bitte das Passwort eingeben.'; return render(); }
+  if (!pw) { swFehler = 'Bitte das Passwort eingeben.'; swSchloss = null; return render(); }
   if (!confirm('Konto und alle Daten am Server wirklich endgültig löschen? Das lässt sich nicht rückgängig machen.')) return;
   try { await swAbruf('/api/app/konto-loeschen', { method: 'POST', body: JSON.stringify({ passwort: pw }) }); }
-  catch (e) { swFehler = e.message; return render(); }
-  swKontoSetzen({ server: swKonto().server }); satVergessen(false); swAnsicht = 'liste'; swStaende = null; swFehler = ''; render();
+  catch (e) { swFehlerVon(e); return render(); }
+  swKontoSetzen({ server: swKonto().server }); satVergessen(false); swAnsicht = 'liste'; swStaende = null; swFehler = ''; swSchloss = null; render();
 }
 
 // Betreiber: Konten verwalten, Karte ein/aus und Unschärfe, Auswertung der geteilten Daten
@@ -1271,7 +1390,7 @@ const swSatKundeSetzen = (id, wert) => swNeuLaden(async () => { await swAbruf(`/
 // Nur ganze Zahlen ab 0 senden; leer oder ungültig → nichts senden, Hinweis, der bisherige Wert bleibt (leer ≠ 0)
 function swSatKundeZahl(id, name, wert) {
   const roh = String(wert ?? '').trim();
-  if (!/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; render(); return; }
+  if (!/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; swSchloss = null; render(); return; }
   return swSatKundeSetzen(id, { [name]: Number(roh) });
 }
 function swSatGrenze(id, wert) { return swSatKundeZahl(id, 'grenze', wert); }
@@ -1298,7 +1417,7 @@ function swSatS1Felder(s) {
 }
 function swSatS1Setzen(name, wert) {
   const zahlFeld = name === 's1_max_jahr' || name === 's1_jahre', roh = String(wert ?? '').trim();
-  if (zahlFeld && !/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; render(); return; }   // leer ≠ 0 (unbegrenzt)
+  if (zahlFeld && !/^\d+$/.test(roh)) { swFehler = 'Bitte eine ganze Zahl ab 0 eingeben – der bisherige Wert bleibt.'; swSchloss = null; render(); return; }   // leer ≠ 0 (unbegrenzt)
   const w = zahlFeld ? Number(roh) : wert;
   return swNeuLaden(async () => { await swAbruf('/api/app/betrieb/satellit', { method: 'POST', body: JSON.stringify({ [name]: w }) }); await swBetriebLaden(); });
 }
@@ -1308,7 +1427,7 @@ async function swSatGeschichte(nr) {
 }
 async function swKundeNeu() {
   const benutzer = $('#sw-kb').value.trim(), name = $('#sw-kn').value.trim(), email = $('#sw-ke').value.trim();
-  if (!benutzer) { swFehler = 'Benutzername fehlt.'; return render(); }
+  if (!benutzer) { swFehler = 'Benutzername fehlt.'; swSchloss = null; return render(); }
   await swNeuLaden(async () => {
     const j = await swAbruf('/api/app/betrieb/kunden', { method: 'POST', body: JSON.stringify({ benutzer, name, email }) });
     alert(`Konto „${benutzer}“ angelegt.\n\nPasswort (nur jetzt sichtbar): ${j.passwort}\n\nServer-Adresse: ${swKonto().server}`);
@@ -1452,8 +1571,8 @@ let swZus = null;
 const SW_WTAGE = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 async function swZusLaden() {
   const standard = { aus: true, uhr: 20, saison_von: '04-01', saison_bis: '08-31', saison_alle: 1, winter_art: 'woche', winter_tag: 0, winter_alle: 7, hinweise_sammeln: false };
-  try { swZus = (await swAbruf('/api/app/zusammenfassung')).einstellung || standard; swFehler = ''; }            // älterer Server: Standard, Speichern meldet den Fehler
-  catch (e) { swZus = standard; swFehler = e.message; }
+  try { swZus = (await swAbruf('/api/app/zusammenfassung')).einstellung || standard; swFehler = ''; swSchloss = null; }            // älterer Server: Standard, Speichern meldet den Fehler
+  catch (e) { swZus = standard; swFehlerVon(e); }
   if (ansicht === 'stockwaage' && swAnsicht === 'meldungen') render();
 }
 function swMeldungenSeite() {
@@ -1463,7 +1582,7 @@ function swMeldungenSeite() {
   const md = s => { const [m, t] = String(s || '').split('-'); return `${Number(t)}.${Number(m)}.`; };
   const opt = (liste, wert) => liste.map(([v, l]) => `<option value="${v}" ${String(v) === String(wert) ? 'selected' : ''}>${l}</option>`).join('');
   const alle = [[1, 'jeden Tag'], [2, 'alle 2 Tage'], [3, 'alle 3 Tage'], [7, 'jede Woche']];
-  main().innerHTML = kopfHtml + (swFehler ? `<ul class="hinweise"><li class="rot">${esc(swFehler)}</li></ul>` : '') +
+  main().innerHTML = kopfHtml + swFehlerZeile() +
     `<div class="karte"><h4>Was kommt wann</h4><div class="klein-t">
       <b>Alarme</b> (Schwarm, Umsturz, Diebstahl, Räuberei …) kommen immer sofort aufs Handy.<br>
       <b>Hinweise</b> (Futter knapp, Flugloch verengt, Summen verändert, Akku …) kommen sofort – oder gesammelt in der Zusammenfassung, siehe unten.<br>
@@ -1488,8 +1607,8 @@ async function swZusSpeichern(aus) {
   if (!aus && (!von || !bis)) return alert('Saison bitte als Tag.Monat. eingeben, z. B. 1.4. und 31.8.');
   const b = aus ? { aus: true } : { uhr: Number($('#zs-uhr').value), saison_von: von, saison_bis: bis, saison_alle: Number($('#zs-salle').value), winter_art: $('#zs-wart').value,
     winter_tag: Number($('#zs-wtag-s').value), winter_alle: Number($('#zs-walle-s').value), hinweise_sammeln: $('#zs-sammeln').checked };
-  try { swZus = (await swAbruf('/api/app/zusammenfassung', { method: 'POST', body: JSON.stringify(b) })).einstellung; swFehler = ''; alert(aus ? 'Zusammenfassung ausgeschaltet.' : 'Gespeichert.'); }
-  catch (e) { swFehler = e.message; }
+  try { swZus = (await swAbruf('/api/app/zusammenfassung', { method: 'POST', body: JSON.stringify(b) })).einstellung; swFehler = ''; swSchloss = null; alert(aus ? 'Zusammenfassung ausgeschaltet.' : 'Gespeichert.'); }
+  catch (e) { swFehlerVon(e); }
   render();
 }
 async function swZusTest() {

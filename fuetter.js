@@ -98,7 +98,7 @@ const fuMaske = fs => fs.filter(f => f.waage).reduce((m, f) => m | (1 << f.waage
 async function fuBefehl(art, volkNr, wert, text) {
   if (!fuS.stand) return;
   try { await swAbruf(`/api/app/stand/${fuS.stand}/befehl`, { method: 'POST', body: JSON.stringify({ art, volk: volkNr, wert, text }) }); }
-  catch (e) { swFehler = e.message; }
+  catch (e) { swFehlerVon(e); }
 }
 
 function fuStandSeite() {
@@ -168,7 +168,7 @@ async function fuVorbuchen() {
   if (!fs.length) return alert('Bei keinem Volk ist eine Menge eingetragen.');
   db.einstellungen.fuetter = { ...e, mischung, lagerId };
   db.fuetterRunden.push(r); db.fuetterungen.push(...fs); speichern();
-  swFehler = '';
+  swFehler = ''; swSchloss = null;
   const maske = fuMaske(fs);
   if (maske) {
     if (e.takt) await fuBefehl('takt', 0, e.takt, `Füttern: Messtakt ${e.takt} min`);
@@ -179,7 +179,7 @@ async function fuVorbuchen() {
 }
 async function fuFertig(rid) {
   const r = db.fuetterRunden.find(x => x.id === rid);
-  r.fertig = Math.floor(Date.now() / 1000); speichern(); swFehler = '';
+  r.fertig = Math.floor(Date.now() / 1000); speichern(); swFehler = ''; swSchloss = null;
   const maske = fuMaske(fuDerRunde(r).filter(f => f.zustand === 'vorgebucht'));
   if (maske) {
     await fuBefehl('fuettern', 0, maske, 'Gefüttert – Schieber verengen');
@@ -199,8 +199,8 @@ async function fuMessen(rid) {
       const kg = fuGemessen(w, r);
       if (kg != null) f.gemessen = kg;
     }
-    speichern(); swFehler = '';
-  } catch (e) { swFehler = e.message; }
+    speichern(); swFehler = ''; swSchloss = null;
+  } catch (e) { swFehlerVon(e); }
   if (ansicht === 'stockwaage' && swAnsicht === 'fuettern') render();
 }
 async function fuBuchen(rid) {

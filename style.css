@@ -7,6 +7,16 @@ body { margin: 0; font: 15px/1.45 system-ui, "Segoe UI", sans-serif; background:
 header { background: #2b2416; color: #fff; position: sticky; top: 0; z-index: 1000; }
 header h1 { margin: 0; padding: 10px 16px 4px; font-size: 20px; }
 header h1 .version { font-size: 12px; font-weight: 400; color: #d8cdb4; }
+header h1 .stufe { font-size: 12px; font-weight: 400; color: #b5a98f; }
+/* Schloss: Funktion braucht eine höhere Stufe (stufe.js) – klein, grau, antippen erklärt die Wege */
+.schloss-marke { cursor: pointer; white-space: nowrap; font-size: 12px; color: var(--leise); }
+.schloss { display: inline-block; padding: 0 6px; border-radius: 99px; background: #ece7dc; color: var(--leise); font-weight: 600; }
+ul.hinweise li.schloss-zeile { border-color: #b5a98f; }
+/* Waldtracht-Ampel (waldtracht.js): Punkte als Kreise – grün/gelb/rot, grau = noch offen */
+.ampel-punkt { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #cfc6b3; vertical-align: middle; }
+.ampel-punkt.gross { width: 18px; height: 18px; }
+.ampel-g { background: var(--gruen); } .ampel-o { background: var(--gelb); } .ampel-r { background: var(--rot); }
+ul.ampel-liste { list-style: none; padding: 0; margin: 4px 0; } ul.ampel-liste li { margin: 2px 0; }
 nav { display: flex; overflow-x: auto; padding: 0 8px; scrollbar-width: none; }
 nav button { background: none; border: 0; color: #d8cdb4; padding: 10px 12px; font: inherit; white-space: nowrap; cursor: pointer; border-bottom: 3px solid transparent; }
 nav button.aktiv { color: #fff; border-color: var(--honig); }
@@ -45,6 +55,12 @@ ul.hinweise li { padding: 8px 12px; border-left: 4px solid var(--gelb); backgrou
 ul.hinweise li.rot { border-color: var(--rot); }
 ul.hinweise li.gruen { border-color: var(--gruen); }
 #karte { height: 420px; border-radius: 12px; border: 1px solid var(--rand); margin-bottom: 12px; }
+/* Karten bilden eine eigene Ebene: Zoom-Knöpfe (Leaflet z-index 1000) rollen unter die Kopfzeile, Popups bleiben in der Karte oben */
+.leaflet-container { isolation: isolate; }
+.feld-info { margin: -6px 0 12px; padding: 8px 12px; background: var(--karte); border: 1px solid var(--rand); border-left: 4px solid var(--honig); border-radius: 0 8px 8px 0; font-size: 15px; }
+.leaflet-tooltip.feld-name { background: #fffd; border: 0; box-shadow: none; padding: 0 4px; font-size: 11px; font-weight: 600; color: #4a3a00; white-space: nowrap; }
+.leaflet-tooltip.feld-name::before { display: none; }
+#punkt-knopf.aktiv { background: var(--honig); border-color: var(--honig-dunkel); font-weight: 600; }
 dialog { border: 0; border-radius: 14px; padding: 18px; width: min(560px, 94vw); max-height: 92vh; }
 dialog::backdrop { background: #0007; }
 dialog h2 { font-size: 18px; }

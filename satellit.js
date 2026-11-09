@@ -23,11 +23,20 @@ const satGesperrt = start => satSchreiben({ frei: false, ...(satStand().veraltet
 
 function satAktiv() { return !!swKonto().token && satStand().frei !== false; }
 // Hinweis statt Kachel: angemeldet, aber nur einer älteren Fassung zugestimmt → um neue Bestätigung bitten
-function satHinweis() { return swKonto().token && satStand().veraltet ? SAT_NEUE_FASSUNG : SAT_HINWEIS; }
+// Angemeldet, aber die Stufe reicht nicht für den Satellit (Pro; eigener Server und noch unbekannte Stufe: kein Schloss, swStufeFrei)
+function satStufeFehlt() { return !!swKonto().token && !swStufeFrei('pro'); }
+// Rückgabe ist HTML (Schloss), alle Teile sind feste Texte
+function satHinweis() {
+  if (satStufeFehlt()) return `${schloss('pro', 'Satellit: Blühfenster, Mahd und Wiesenfaktor an deinen Standplätzen')} Satellit gibt es ab Stufe Pro`;
+  return swKonto().token && satStand().veraltet ? SAT_NEUE_FASSUNG : SAT_HINWEIS;
+}
 
 // Freigabe „satellit“ aktiv? Gemerkt 1 h; sonst GET /api/app/freigaben (ohne Koordinaten). Fehler → false (nichts senden).
 // veraltet (Server meldet: zuletzt einer älteren Fassung zugestimmt) gilt nicht als frei
+// Nicht frische Stufe zuerst beim Server auffrischen (stufe.js; Fix-Runde 2) – sonst sperrte eine 7 Tage alte Stufe den Satellit trotz Netz
+const satStufeAuffrischen = () => (typeof stufeAuffrischen === 'function' ? stufeAuffrischen() : false);
 async function satFrei(start) {
+  await satStufeAuffrischen();
   const s = satStand();
   if (typeof s.frei === 'boolean' && Date.now() - (s.ft || 0) < SAT_STUNDE) return s.frei;
   try {
@@ -42,21 +51,66 @@ async function satFrei(start) {
 // Höchstens einmal je Stunde; geänderte Liste → sofort. erzwingen nur nach ausdrücklichem Erlauben (swFreigabe).
 async function satMelden(erzwingen = false) {
   if (!swKonto().token) return null;
+  await satStufeAuffrischen();
+  if (satStufeFehlt()) return null;   // Hauptserver, Stufe bekannt ohne Pro: gar nicht anfragen (der Server sagte nur 402)
   const start = satWiderrufe;
   if (!erzwingen && !(await satFrei(start))) return null;
   if (start !== satWiderrufe) return null;
-  const r = satR(flugradius());
-  const liste = db.standorte.filter(hatKoord).map(s => ({ id: s.id, lat: s.lat, lon: s.lon, r }));
-  const sig = JSON.stringify(liste), alt = satStand();
+  const r = satR(flugradius()), jahr = new Date().getFullYear();
+  const liste = db.standorte.filter(hatKoord).map(s => satEintrag(s, r, jahr));
+  // Signatur ohne wald: ein neuer Waldkarten-Wert allein löst keine Meldung aus (kommt mit der nächsten)
+  const sig = JSON.stringify(liste.map(({ wald, ...x }) => x)), alt = satStand();
   if (!erzwingen && alt.sig === sig && Array.isArray(alt.status) && Date.now() - alt.t < SAT_STUNDE) return alt.status;
   try {
     const j = await swAbruf('/api/app/standplaetze', { method: 'POST', body: JSON.stringify({ standplaetze: liste }) });
     const status = Array.isArray(j.standplaetze) ? j.standplaetze : [];
-    return satSchreiben({ t: Date.now(), sig, status, frei: true, ft: Date.now(), anker: satAnkerNeu(liste) }, start) ? status : null;
+    const warnung = satStandWarnungen(liste, status);
+    return satSchreiben({ t: Date.now(), sig, status, frei: true, ft: Date.now(), anker: satAnkerNeu(liste), ...(Object.keys(warnung).length ? { warnung } : {}) }, start) ? status : null;
   } catch (e) {
     if (/Freigabe/.test(e.message)) satGesperrt(start);
     return null;
   }
+}
+
+// Ein Standplatz der Meldung; dazu für die Waldtracht (Spec 3.1): Waagen-Stand, Waldanteil, Beobachtung des Jahres, Höhe.
+// Nur gültige Werte, sonst lehnt der Server die ganze Liste ab (400). Felder ohne Wert fehlen (wald) bzw. sind null (hoehe).
+function satEintrag(s, r, jahr) {
+  const e = { id: s.id, lat: s.lat, lon: s.lon, r };
+  if (typeof s.waageStand === 'string' && /^[0-9a-f]{8}$/i.test(s.waageStand)) e.stand = s.waageStand;
+  const wald = satWald(s);
+  if (wald) e.wald = wald;
+  const b = typeof wtBeobachtungZusammenfassung === 'function' ? wtBeobachtungZusammenfassung(s.id, jahr) : null;
+  if (b) e.beobachtung = b;
+  e.hoehe = typeof s.hoehe === 'number' && isFinite(s.hoehe) ? s.hoehe : null;
+  return e;
+}
+// Waldanteil im Flugradius aus dem Zwischenspeicher der Waldkarte (quellen.js waldHolen, Anteile 0–1) → Prozent { anteil, nadel } | null.
+// Nur lesen, gleich welchen Alters – kein eigener Abruf
+function satWald(s) {
+  try {
+    const d = JSON.parse(localStorage.getItem(`imkerei-wald-${k3(s.lat, s.lon)}-${flugradius()}`))?.d;
+    const p = x => typeof x === 'number' && isFinite(x) ? Math.round(Math.min(1, Math.max(0, x)) * 1000) / 10 : null;
+    return d && p(d.anteil) != null ? { anteil: p(d.anteil), nadel: p(d.nadel) } : null;
+  } catch { return null; }
+}
+// Ein Stand darf am Server nur bei einem Standplatz stehen (der jüngere gewinnt). Liefert der Server für einen Standplatz einen anderen
+// (oder keinen) Stand als gesendet → { id: Name des anderen Standplatzes mit derselben Waage | '' }. Ohne Feld stand (alter Server) nichts.
+function satStandWarnungen(liste, status) {
+  const warnung = {};
+  for (const e of liste) {
+    const x = status.find(y => y.id === e.id);
+    if (!e.stand || !x || !('stand' in x) || String(x.stand || '').toUpperCase() === e.stand.toUpperCase()) continue;
+    const andere = db.standorte.find(o => o.id !== e.id && String(o.waageStand || '').toUpperCase() === e.stand.toUpperCase());
+    warnung[e.id] = andere ? andere.name || 'ohne Namen' : '';
+  }
+  return warnung;
+}
+// Warnung zum Waagen-Stand aus der letzten Meldung als Text oder ''
+function satStandWarnung(sid) {
+  const w = satStand().warnung?.[sid];
+  if (w == null) return '';
+  return w ? `Diese Waage ist auch bei Standplatz „${w}“ eingetragen – der Server nimmt den jüngeren.`
+    : 'Der Server hat die Waage diesem Standplatz nicht zugeordnet – sie gehört nicht zu deinem Konto oder steht bei einem anderen Standplatz.';
 }
 
 // ---------- Teure Änderungen (Geschichte neu am Server) nur nach Rückfrage ----------
@@ -102,6 +156,8 @@ async function satPruefen() {
 
 async function satHolen(sid, jahr) {
   if (!satAktiv()) return null;
+  await satStufeAuffrischen();
+  if (satStufeFehlt()) return null;
   const start = satWiderrufe, schluessel = 'imkerei-sat-' + sid + '-' + jahr;
   // Antwort ohne Auswertung nur 1 h merken, damit die ersten Werte nach dem Nachtlauf bald kommen
   try { const alt = JSON.parse(localStorage.getItem(schluessel)); if (alt && !alt.d?.stand && Date.now() - alt.t >= SAT_STUNDE) localStorage.removeItem(schluessel); } catch {}
@@ -193,14 +249,18 @@ async function satBestaetigen(sid, gruppe, jahr, stimmt) {
 }
 
 // Ohne Auswertung: kurz, warum (nur „wartet“, „Fehler“ und „noch keine Werte“ – „geschichte“ springt in der Saison kurz)
-const SAT_OHNE = { wartet: 'Satellit: wartet – höchstens 3 Standplätze mit Satellit', fehler: 'Satellitenwerte gerade nicht abrufbar' };
+// eintrag: Status des Standplatzes vom Server; „wartet“ mit grund „probe“ = in der Probezeit nur 1 Standplatz (Spec 3a)
+function satOhneText(eintrag) {
+  if (eintrag?.status === 'wartet') return eintrag.grund === 'probe' ? 'Satellit: In der Probezeit 1 Standplatz – mit Pro alle' : 'Satellit: wartet – höchstens 3 Standplätze mit Satellit';
+  return eintrag?.status === 'fehler' ? 'Satellitenwerte gerade nicht abrufbar' : '';
+}
 // Kachel „Satellit“ unter der Trachttabelle; ohne Anmeldung/Freigabe und ohne Auswertung leer.
 // r: Flugradius der App – weicht der Kreis am Server ab (höchstens 5 km), steht er dabei, damit die Hektar zur Tabelle passen
 function satKachel(a, sid, r) {
   if (!a) {
     if (!satAktiv()) return '';
-    const st = (satStand().status || []).find(x => x.id === sid)?.status;
-    return `<p class="leise klein-t">${SAT_OHNE[st] || 'Satellitenwerte werden vorbereitet – erste Werte nach der nächsten Nacht'}.</p>`;
+    const st = (satStand().status || []).find(x => x.id === sid);
+    return `<p class="leise klein-t">${satOhneText(st) || 'Satellitenwerte werden vorbereitet – erste Werte nach der nächsten Nacht'}.</p>`;
   }
   const rSat = a.r_km ?? (r != null ? satR(r) : null), kreis = rSat != null && r != null && rSat !== r ? ` · im Satellitenkreis ${zahl(rSat)} km` : '';
   const knopf = (g, stimmt, text) => `<button class="klein" onclick="satBestaetigen('${esc(sid)}','${g}',${a.jahr},${stimmt})">${esc(text)}</button>`;
@@ -248,11 +308,12 @@ function rapsHinweis(s, m) {
   return b ? ` · laut Satellit seit ${satTag(b.beginn)}` : '';
 }
 
-// widerruf: Zustand „frei: false“ merken (nichts mehr senden); sonst (Abmelden, Konto gelöscht) alles weg, Zustand unbekannt
+// widerruf: Zustand „frei: false“ merken (nichts mehr senden); sonst (Abmelden, Konto gelöscht) alles weg, Zustand unbekannt.
+// Die Waldtracht-Antworten (imkerei-wt-*) kommen vom selben Server und gehen mit
 function satVergessen(widerruf = true) {
   satWiderrufe++;
   const weg = [];
-  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === SAT_SPEICHER || k?.startsWith('imkerei-sat-')) weg.push(k); }
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k === SAT_SPEICHER || k?.startsWith('imkerei-sat-') || k?.startsWith('imkerei-wt-')) weg.push(k); }
   for (const k of weg) localStorage.removeItem(k);
   if (widerruf) try { localStorage.setItem(SAT_SPEICHER, JSON.stringify({ frei: false, ft: Date.now() })); } catch {}
 }

@@ -193,6 +193,51 @@ function waldText(w) {
   return `Wald im Flugradius: ${p(w.anteil)}${w.nadel === null ? '' : `, davon ${p(w.nadel)} Nadelwald – Waldtracht (Honigtau) möglich, nicht vorhersagbar`} (EEA Copernicus 2018)`;
 }
 
+// ---------- Felder auf der Karte ----------
+const FELD_STIL = { weight: 1, color: '#8a6d00', opacity: 0.9, fillColor: '#e0a100', fillOpacity: 0.55 };
+const FELD_GEWAEHLT = { weight: 3, color: '#3d2a00', opacity: 1 };
+// „WINTERRAPS“ → „Winterraps“
+const kulturName = name => name ? name.charAt(0) + name.slice(1).toLowerCase() : 'Unbekannt';
+// Kurzname für die Beschriftung im Feld: erstes Wort, höchstens 16 Zeichen
+function kulturKurz(name) {
+  if (name === LSE_NAME) return 'Hecke';
+  const w = kulturName((name || '').split(/[\s,(/]+/).find(Boolean) || name);
+  return w.length > 16 ? w.slice(0, 15) + '…' : w;
+}
+// Text der Zeile unter der Karte (reiner Text, nicht HTML)
+function feldInfoText(n) { return `${kulturName(n.name)} · ${zahl(n.ha, 2)} ha${n.boden ? ` · Boden: ${n.boden}` : ''}`; }
+// Kulturname im Feld erst ab Zoomstufe 15 und nur für Felder ab 0,5 ha – sonst zu voll
+const feldNameZeigen = (zoom, ha) => zoom >= 15 && ha >= 0.5;
+let potNamen = null, feldGewaehlt = null;
+// Welche Namen gerade gezeigt werden: Zoom und Größe passen, Feldmitte im sichtbaren Ausschnitt (liste: [tooltip, ha, [lat, lon]])
+const feldNamenImAusschnitt = (liste, bounds, zoom) => liste.filter(([, ha, p]) => feldNameZeigen(zoom, ha) && bounds.contains(p));
+function feldNamen() {
+  if (!potNamen || !karte) return;
+  const zeigen = new Set(feldNamenImAusschnitt(potNamen.liste, karte.getBounds(), karte.getZoom()).map(e => e[0]));
+  for (const [t] of potNamen.liste) { const an = zeigen.has(t); if (an && !potNamen.hasLayer(t)) potNamen.addLayer(t); else if (!an && potNamen.hasLayer(t)) potNamen.removeLayer(t); }
+}
+// Zeichnet die Nektarflächen neu (dünner Rand, Antippen → Zeile unter der Karte, Namen ab Zoom 15) und zoomt auf den Flugkreis
+function feldEbene(s, flaechen, r) {
+  potEbene?.remove(); potNamen?.remove(); feldGewaehlt = null;
+  const namen = [];
+  potEbene = L.layerGroup(flaechen.map(n => {
+    const lage = L.geoJSON(n.g, { style: FELD_STIL }).bindTooltip(() => esc(feldInfoText(n)), { sticky: true });
+    lage.on('click', () => feldWaehlen(lage, n));
+    if (feldNameZeigen(99, n.ha)) { const [lon, lat] = mitte(n.g); namen.push([L.tooltip({ permanent: true, direction: 'center', className: 'feld-name', interactive: false }).setLatLng([lat, lon]).setContent(esc(kulturKurz(n.name))), n.ha, [lat, lon]]); }
+    return lage;
+  })).addTo(karte);
+  potNamen = L.layerGroup().addTo(karte); potNamen.liste = namen;
+  karte.off('zoomend moveend', feldNamen).on('zoomend moveend', feldNamen);
+  karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000), { maxZoom: 15 });
+  feldNamen();
+  const fi = $('#feld-info'); if (fi) { fi.hidden = false; fi.textContent = 'Gelbes Feld antippen: Kultur, Fläche und Boden erscheinen hier.'; }
+}
+function feldWaehlen(lage, n) {
+  feldGewaehlt?.setStyle(FELD_STIL);
+  feldGewaehlt = lage; lage.setStyle(FELD_GEWAEHLT); lage.bringToFront();
+  const fi = $('#feld-info'); if (fi) { fi.hidden = false; fi.textContent = feldInfoText(n); }
+}
+
 // ---------- Berechnung und Anzeige ----------
 let potEbene = null;
 // Laufzähler: Nachgeladenes (Boden, Wald) gilt nur, solange kein neuer Lauf (anderer Standplatz oder anderes Jahr) gestartet ist
@@ -225,11 +270,16 @@ async function potenzial(sid, jahr) {
   if (lse.length) { felder.kulturen[LSE_NAME] = lse.reduce((a, n) => a + n.ha, 0); felder.nektarFlaechen.push(...lse); }
   // Satellit: zuerst der letzte Stand aus dem Zwischenspeicher (gleich welchen Alters), dann frisch vom Server
   const satDa = typeof satAktiv === 'function' && satAktiv();
-  potLetzt = { sid, jahr, r, felder, wetter, jahre, sat: satDa ? satLetzt(sid, jahr) : null };
+  // Waldtracht (waldtracht.js) genauso: letzter Stand sofort, dann frisch (1 h Zwischenspeicher)
+  const mitWt = satDa && typeof wtHolen === 'function';
+  potLetzt = { sid, jahr, r, felder, wetter, jahre, sat: satDa ? satLetzt(sid, jahr) : null, wt: mitWt ? wtLetzt(sid, jahr) : null };
   potZeigen(true);
   // Stand der Freigabe unbekannt: erst fragen; ist sie aus, gleich neu zeichnen (Hinweis statt Kachel)
-  if (satDa) satPruefen().then(an => an ? satHolen(sid, jahr) : null)
+  const frei = satDa ? satPruefen() : null;
+  if (frei) frei.then(an => an ? satHolen(sid, jahr) : null)
     .then(a => (a || potLetzt?.sat || !satAktiv()) && potNachladen(lauf, 'sat', a));
+  // Waldtracht: immer neu zeichnen – ohne Antwort zeigt die Kachel Hinweis, Schloss oder Fehler
+  if (frei && mitWt) frei.then(an => an ? wtHolen(sid, jahr) : null).then(d => potNachladen(lauf, 'wt', d));
   bodenHolen(felder.nektarFlaechen).then(b => potNachladen(lauf, 'boden', b));
   waldHolen(s.lat, s.lon, r).catch(() => null).then(w => potNachladen(lauf, 'wald', w));
 }
@@ -275,27 +325,31 @@ function trachtKachel(s) {
     : `<div class="karte" style="margin-bottom:12px"><h4>Trachtkarte ${esc(s.name)}</h4><p class="leise klein-t">Flächenanteile aus OpenStreetMap im Flugradius</p>${knopf('Trachtkarte laden')}</div>`;
 }
 function potZeigen(neueKarte) {
-  const { sid, jahr, r, felder, wetter, jahre, boden, wald, sat = null } = potLetzt, s = standort(sid), info = $('#tracht-info');
+  const { sid, jahr, r, felder, wetter, jahre, boden, wald, sat = null, wt = null } = potLetzt, s = standort(sid), info = $('#tracht-info');
   if (!s || !info) return;
   const { zeilen, rest, min, max, f, voelker, schaetzung, umkreis, wiesenfaktor } = potRechnen(s, felder, wetter, r, sat), mitte = (min + max) / 2;
   (s.potenzial ??= {})[jahr] = { min: Math.round(min), max: Math.round(max), faktor: +f.toFixed(2), spei: wetter?.art === 'spei' ? Math.round(wetter.spei90 * 10) / 10 : null, radius: r, datum: heute(), wiesenfaktor }; speichern();
   // Satellit: echtes Blühfenster der Gelb-Gruppen, Wiesenzeilen (Faktor oder vorläufig); ohne Anmeldung einmal der Hinweis
+  // (satHinweis ist HTML aus festen Texten, bei fehlender Stufe Pro mit Schloss – deshalb hier ohne esc)
   const SAT_GELB = ['raps', 'sonnenblume', 'phacelia'], mitSat = typeof satAktiv === 'function';
   const fenster = g => SAT_GELB.includes(g) ? sat?.bluete?.find(b => b.gruppe === g && b.hoehepunkt) : null;
   // Wiesen: „Wiesen: …“ mit dem Gruppennamen dahinter; Futter-Gruppen mit ihrem Namen vorn (Futterfaktor)
   const wiesen = zeilen.filter(z => sat?.wiesenfaktor?.[z.g[0]]).map(z => z.g[0].startsWith('wiese')
     ? `<li>${wiesenText(sat.wiesenfaktor[z.g[0]])} <span class="leise klein-t">(${esc(z.g[1])})</span></li>` : `<li>${wiesenText(sat.wiesenfaktor[z.g[0]], esc(z.g[1]))}</li>`);
+  // Spec 8e: Äcker im Jahr ohne AMA-Liste (Vermutung des Servers) – Sommerkulturen zählen mit 0 kg/ha, bis die AMA-Liste kommt
+  const acker = sat?.acker_vermutung, vermutet = '<span class="leise klein-t">(Satellit, vermutet)</span>';
+  // Wintergetreide ohne die als Raps vermuteten Äcker (die stehen schon als Raps im Potenzial), nie unter 0
+  const winter = Math.max(0, (acker?.wintergetreide_ha || 0) - (acker?.raps_vermutet_ha || 0));
+  const hinweise = [...wiesen,
+    ...(acker?.sommerkultur_ha > 0 ? [`<li>Sommerkulturen: ${zahl(acker.sommerkultur_ha, 1)} ha – Art erst mit der AMA-Liste ${vermutet}</li>`] : []),
+    ...(winter >= 0.05 ? [`<li>Wintergetreide: ${zahl(winter, 1)} ha ${vermutet}</li>`] : [])];
   const blueteText = z => { const b = fenster(z.g[0]); return b ? `${satFensterText(b)}<div class="leise klein-t">Satellit${b.vermutet ? ', vermutet' : ''}</div>`
     : z.g[5][0] === z.g[5][1] ? MONAT[z.g[5][0]] : `${MONAT[z.g[5][0]]}–${MONAT[z.g[5][1]]}`; };
   // Abgleich mit den eigenen Ernten an diesem Standplatz
   const vergleich = Object.entries(s.potenzial).map(([j, p]) => ({ j, p, kg: ernteAm(s, j) })).filter(x => x.kg > 0).sort((a, b) => b.j.localeCompare(a.j));
   const anteile = vergleich.map(x => x.kg / ((x.p.min + x.p.max) / 2)), erfahrung = anteile.length ? anteile.reduce((a, b) => a + b, 0) / anteile.length : null;
-  // Nektarflächen auf der Karte
-  if (neueKarte && karte && window.L) {
-    potEbene?.remove();
-    potEbene = L.layerGroup(felder.nektarFlaechen.map(n => L.geoJSON(n.g, { style: { stroke: false, fillColor: '#e0a100', fillOpacity: 0.55 } }).bindTooltip(() => `${esc(n.name)} · ${zahl(n.ha, 2)} ha${n.boden ? ` · Boden: ${n.boden}` : ''}`))).addTo(karte);
-    karte.fitBounds(L.latLng(s.lat, s.lon).toBounds(r * 2000 + 400));
-  }
+  // Nektarflächen auf der Karte: dünner Rand, Antippen zeigt die Feld-Info unter der Karte, ab Zoom 15 Kulturname im Feld
+  if (neueKarte && karte && window.L) feldEbene(s, felder.nektarFlaechen, r);
   const restHa = Object.values(rest).reduce((a, b) => a + b, 0), restTop = Object.entries(rest).sort((a, b) => b[1] - a[1]).slice(0, 6);
   info.innerHTML = `<div class="karte" id="pot-karte" style="margin-bottom:12px"><div class="kopf" style="margin-bottom:6px"><h4 style="margin:0">Trachtpotenzial ${esc(s.name)} · ${zahl(r)} km</h4>
       <select style="width:auto" onchange="potenzial('${sid}',this.value)">${jahre.map(j => `<option ${j === jahr ? 'selected' : ''}>${j}</option>`).join('')}</select></div>
@@ -311,8 +365,9 @@ function potZeigen(neueKarte) {
     <h4 style="margin-top:12px">Trachtflächen laut AMA ${jahr}</h4>` +
     tabelle(['Tracht', 'Fläche', 'Blüte', 'Richtwert', 'Potenzial'], zeilen.map(z => [`<b>${esc(z.g[1])}</b><div class="leise klein-t">${esc([...z.namen].join(', ').toLowerCase())}</div>`, zahl(z.ha, 1) + ' ha',
       blueteText(z), `${z.lo}–${z.hi} kg/ha`, `${zahl(z.min * z.fb, 0)}–${zahl(z.max * z.fb, 0)} kg`])) +
-    `${wiesen.length ? `<ul class="hinweise" style="margin-top:10px">${wiesen.join('')}</ul>` : ''}
-    ${mitSat ? (satAktiv() ? satKachel(sat, sid, r) : `<p class="leise klein-t">${satHinweis()}.</p>`) : ''}
+    `${hinweise.length ? `<ul class="hinweise" style="margin-top:10px">${hinweise.join('')}</ul>` : ''}
+    ${mitSat ? (satAktiv() && !satStufeFehlt() ? satKachel(sat, sid, r) : `<p class="leise klein-t">${satHinweis()}.</p>`) : ''}
+    ${typeof wtKachel === 'function' ? wtKachel(s, jahr, wald, wt) : ''}
     ${felder.nektarFlaechen.length ? `<p class="leise klein-t">${boden === undefined ? 'Bodenkarte wird geladen …' : bodenText(boden)}</p>` : ''}
     ${wald ? `<p class="leise klein-t">${waldText(wald)}</p>` : ''}
     <p class="klein-t">Ohne nennenswerten Nektar: ${zahl(restHa, 0)} ha${restTop.length ? ` (${restTop.map(([n, ha]) => `${n.toLowerCase()} ${zahl(ha, 0)} ha`).join(', ')} …)` : ''}. Auf der Karte sind die Trachtflächen gelb markiert.</p>

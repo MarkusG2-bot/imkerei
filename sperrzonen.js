@@ -38,6 +38,7 @@ function sperrKreise() {
 }
 function sperrEintragen() {
   sperrModus = !sperrModus;
+  if (sperrModus && punktModus) { punktModus = false; const p = $('#punkt-knopf'); if (p) p.classList.remove('aktiv'); }   // nicht beide Modi gleichzeitig
   const h = $('#kartenhinweis'); if (h) h.textContent = sperrModus ? 'Tippe auf die Karte an den Ausbruchsort (Mittelpunkt der Sperrzone). Vorher kannst du mit „Ort suchen“ hinfahren.' : '';
   const b = $('#sperr-knopf'); if (b) b.classList.toggle('haupt', sperrModus);
 }
